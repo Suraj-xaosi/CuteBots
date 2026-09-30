@@ -1,0 +1,31 @@
+{
+  "name": "@workspace/db",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "prisma generate --no-hints && tsc -p tsconfig.json",
+    "db:generate": "prisma generate --no-hints",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/adapter-better-sqlite3": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "@workspace/core": "*",
+    "@workspace/types": "*",
+    "dotenv": "^18.0.4"
+  },
+  "devDependencies": {
+    "@workspace/typescript-config": "*",
+    "prisma": "7.10.0",
+    "typescript": "^5"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  }
+}

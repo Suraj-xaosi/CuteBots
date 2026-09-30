@@ -1,0 +1,15 @@
+FROM node:20-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl bash sudo ca-certificates \
+    && npm install -g pnpm typescript ts-node \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
+    && mkdir -p /workspace \
+    && chown node:node /workspace
+
+WORKDIR /workspace
+USER node
+CMD ["sleep", "infinity"]

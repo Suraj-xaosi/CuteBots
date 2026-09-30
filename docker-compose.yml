@@ -1,0 +1,67 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - workspace_node_modules:/app/node_modules
+    restart: unless-stopped
+    depends_on:
+      - agent
+    networks:
+      - app-net
+
+  agent:
+    build:
+      context: .
+      dockerfile: apps/agent/Dockerfile
+    ports:
+      - "3001:3001"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - .:/app
+      - workspace_node_modules:/app/node_modules
+      - agent_data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      PORT: 3001
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-devin-sandbox-node:latest}
+      SANDBOX_NETWORK: sandbox-net
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      MEM0_HISTORY_DB_PATH: /app/data/mem0-history.db
+      DATABASE_URL: file:/app/data/database.db
+    restart: unless-stopped
+    depends_on:
+      - qdrant
+    networks:
+      - app-net
+      - sandbox-net
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    driver: bridge
+  sandbox-net:
+    name: sandbox-net
+    driver: bridge
+
+volumes:
+  agent_data:
+  qdrant_data:
+  workspace_node_modules:

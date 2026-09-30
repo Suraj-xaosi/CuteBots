@@ -1,0 +1,134 @@
+generator client {
+  provider             = "prisma-client"
+  output               = "../src/generated/prisma"
+  moduleFormat         = "esm"
+  importFileExtension  = "ts"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Project {
+  id              String          @id @default(cuid())
+  name            String
+  repo_url        String
+  github_token    String?         // AES-256 encrypted; agent-only
+  clone_credential String?        // encrypted, read-only credential for sandbox clone
+  container_id    String?
+  status          ProjectStatus   @default(ACTIVE)
+  sandbox_status  SandboxStatus   @default(STOPPED)
+  sandbox_type    String          @default("node")
+  workspace_ready Boolean         @default(false)
+  created_at      DateTime        @default(now())
+  tasks           Task[]
+  messages        Message[]
+  project_memory  ProjectMemory[]
+}
+
+model Task {
+  id          String       @id @default(cuid())
+  project_id  String
+  project     Project      @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  description String
+  status      TaskStatus   @default(PENDING)
+  fail_reason String?
+  created_at  DateTime     @default(now())
+  updated_at  DateTime     @updatedAt
+  messages    Message[]
+  task_memory TaskMemory[]
+  token_usage TokenUsage[]
+  logs        AgentLog[]
+
+  @@index([project_id, created_at])
+  @@index([status])
+}
+
+model Message {
+  id            String   @id @default(cuid())
+  task_id       String
+  project_id    String
+  task          Task     @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  project       Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  role          MessageRole
+  content       String
+  tool_calls    String?
+  tool_call_id  String?
+  created_at    DateTime @default(now())
+
+  @@index([task_id, created_at])
+}
+
+model AgentLog {
+  id         Int      @id @default(autoincrement())
+  task_id    String
+  task       Task     @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  type       String
+  content    String
+  created_at DateTime @default(now())
+
+  @@index([task_id, id])
+}
+
+model TokenUsage {
+  id            String   @id @default(cuid())
+  task_id       String
+  task          Task     @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  input_tokens  Int
+  output_tokens Int
+  created_at    DateTime @default(now())
+
+  @@index([task_id, created_at])
+}
+
+model TaskMemory {
+  id         String   @id @default(cuid())
+  task_id    String
+  task       Task     @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  fact       String
+  created_at DateTime @default(now())
+
+  @@index([task_id, created_at])
+}
+
+model ProjectMemory {
+  id         String   @id @default(cuid())
+  project_id String
+  project    Project  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  fact       String
+  created_at DateTime @default(now())
+
+  @@index([project_id, created_at])
+}
+
+enum ProjectStatus {
+  ACTIVE
+  STOPPED
+}
+
+enum TaskStatus {
+  PENDING
+  RUNNING
+  PAUSED
+  DONE
+  FAILED
+  CANCELLED
+}
+
+enum SandboxStatus {
+  RUNNING
+  STOPPED
+}
+
+enum MessageRole {
+  user
+  assistant
+  tool
+}
+
+model Setting {
+  key        String   @id
+  value      String
+  is_secret  Boolean  @default(false)
+  updated_at DateTime @updatedAt
+}

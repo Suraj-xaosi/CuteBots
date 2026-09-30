@@ -43,3 +43,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+*.db
+*.db-journal
+packages/db/src/generated/prisma/
+
+
+#md
+kutebots.md
