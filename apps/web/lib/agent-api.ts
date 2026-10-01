@@ -47,6 +47,13 @@ export interface PublicSettings {
   configuredSecrets: { LLM_API_KEY?: boolean; TELEGRAM_BOT_TOKEN?: boolean; TELEGRAM_CHAT_ID?: boolean }
 }
 
+export interface CreateProjectInput {
+  name: string
+  repo_url: string
+  github_token?: string
+  clone_credential?: string
+}
+
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const apiPath = path.startsWith("/api/") ? path.slice(4) : path
   const response = await fetch(`${AGENT_BASE_PATH}${apiPath}`, {
@@ -116,12 +123,7 @@ export async function createTask(projectId: string, description: string): Promis
   }
 }
 
-export async function createProject(input: {
-  name: string
-  repo_url: string
-  github_token?: string
-  clone_credential?: string
-}): Promise<ProjectSummary> {
+export async function createProject(input: CreateProjectInput): Promise<ProjectSummary> {
   const response = await apiRequest<{ project: ProjectSummary }>("/projects/", {
     method: "POST",
     body: JSON.stringify(input),

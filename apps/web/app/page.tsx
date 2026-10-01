@@ -1,5 +1,5 @@
-import { DashboardClient } from "@/components/dashboard-client"
+import { DashboardWorkspace } from "@/components/dashboard-workspace"
 
 export default function Page() {
-  return <DashboardClient />
+  return <DashboardWorkspace />
 }

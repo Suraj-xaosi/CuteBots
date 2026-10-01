@@ -1,44 +1,61 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import type { StreamEvent } from "@/lib/agent-api"
 
-export function useTaskStream(taskId: string | null) {
-  const [events, setEvents] = useState<StreamEvent[]>([])
-  const [status, setStatus] = useState<"idle" | "connecting" | "connected" | "error">("idle")
+type StreamStatus = "idle" | "connecting" | "connected" | "error"
+
+interface TaskStreamState {
+  taskId: string | null
+  events: StreamEvent[]
+  status: StreamStatus
+}
+
+const EMPTY_EVENTS: StreamEvent[] = []
+
+export function useTaskStream(taskId: string | null): { events: StreamEvent[]; status: StreamStatus } {
+  const [streamState, setStreamState] = useState<TaskStreamState>({
+    taskId: null,
+    events: [],
+    status: "idle",
+  })
 
   useEffect(() => {
-    const activeTaskId = taskId
-    if (!activeTaskId) {
-      setEvents([])
-      setStatus("idle")
+    if (!taskId) {
       return
     }
 
-    const streamTaskId = activeTaskId as string
-
-    setEvents([])
-    setStatus("connecting")
-    const stream = new EventSource(`/api/tasks/${streamTaskId}/stream`)
-    stream.onopen = () => setStatus("connected")
+    const updateStatus = (status: StreamStatus) => {
+      setStreamState((current) => ({
+        taskId,
+        events: current.taskId === taskId ? current.events : [],
+        status,
+      }))
+    }
+    const stream = new EventSource(`/api/tasks/${taskId}/stream`)
+    stream.onopen = () => updateStatus("connected")
     stream.onmessage = (message) => {
       try {
         const event = JSON.parse(message.data) as StreamEvent
         if (!Number.isSafeInteger(event.id) || !event.content || !event.type) return
-        setEvents((previous) => {
-          if (previous.some((item) => item.id === event.id)) return previous
-          return [...previous, event].slice(-200)
+        setStreamState((current) => {
+          const events = current.taskId === taskId ? current.events : []
+          if (events.some((item) => item.id === event.id)) return current
+          return { taskId, events: [...events, event].slice(-200), status: current.status }
         })
       } catch {
-        setStatus("error")
+        updateStatus("error")
       }
     }
-    stream.onerror = () => setStatus("connecting")
+    stream.onerror = () => updateStatus("connecting")
     return () => {
       stream.close()
     }
   }, [taskId])
 
-  return { events, status }
+  const events = taskId && streamState.taskId === taskId ? streamState.events : EMPTY_EVENTS
+  const status = !taskId ? "idle" : streamState.taskId === taskId ? streamState.status : "connecting"
+
+  return useMemo(() => ({ events, status }), [events, status])
 }
