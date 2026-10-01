@@ -34,6 +34,8 @@ test("recoverOnStartup marks crashed tasks as failed and reattaches surviving sa
 
   const tasks = [
     { id: "task-running", project_id: "proj-ok", status: TaskStatus.RUNNING, fail_reason: null },
+    { id: "task-pending", project_id: "proj-ok", description: "continue queued work", status: TaskStatus.PENDING, fail_reason: null },
+    { id: "task-stranded", project_id: "proj-lost", description: "cannot run", status: TaskStatus.PENDING, fail_reason: null },
     { id: "task-paused", project_id: "proj-ok", status: TaskStatus.PAUSED, fail_reason: null },
     { id: "task-other", project_id: "proj-lost", status: TaskStatus.RUNNING, fail_reason: null },
   ];
@@ -43,12 +45,18 @@ test("recoverOnStartup marks crashed tasks as failed and reattaches surviving sa
 
   const prisma = {
     task: {
-      updateMany: async ({ where }: { where: { status: TaskStatus } }) => {
+      findMany: async ({ where, orderBy }: { where: { status: TaskStatus }; orderBy: unknown }) => {
+        assert.deepEqual(orderBy, [{ created_at: "asc" }, { id: "asc" }]);
+        return Array.from(taskTable.values())
+          .filter((task) => task.status === where.status)
+          .map(({ id, project_id, description }) => ({ id, project_id, description }));
+      },
+      updateMany: async ({ where, data }: { where: { status?: TaskStatus; id?: { in: string[] } }; data: { status: TaskStatus; fail_reason: string } }) => {
         let count = 0;
         for (const task of taskTable.values()) {
-          if (task.status === where.status) {
-            task.status = TaskStatus.FAILED;
-            task.fail_reason = "Server crashed";
+          if ((where.status === undefined || task.status === where.status) && (!where.id || where.id.in.includes(task.id))) {
+            task.status = data.status;
+            task.fail_reason = data.fail_reason;
             count += 1;
           }
         }
@@ -80,17 +88,20 @@ test("recoverOnStartup marks crashed tasks as failed and reattaches surviving sa
       return { ok: false, error: "Container not found", code: "CONTAINER_NOT_FOUND" };
     },
     cleanupStale: async (projectIds: ReadonlySet<string>) => {
-      assert.deepEqual([...projectIds].sort(), ["proj-lost", "proj-ok"].sort());
+      assert.deepEqual([...projectIds], ["proj-ok"]);
       return { ok: true, data: undefined };
     },
   } as any;
 
   const service = new ProjectService(prisma, containers);
-  await service.recoverOnStartup();
+  const pendingTasks = await service.recoverOnStartup();
 
   assert.equal(taskTable.get("task-running")?.status, TaskStatus.FAILED);
   assert.equal(taskTable.get("task-running")?.fail_reason, "Server crashed");
   assert.equal(taskTable.get("task-paused")?.status, TaskStatus.PAUSED);
+  assert.deepEqual(pendingTasks, [{ id: "task-pending", projectId: "proj-ok", description: "continue queued work" }]);
+  assert.equal(taskTable.get("task-stranded")?.status, TaskStatus.FAILED);
+  assert.equal(taskTable.get("task-stranded")?.fail_reason, "Project sandbox unavailable during recovery");
   assert.equal(projectTable.get("proj-ok")?.sandbox_status, SandboxStatus.RUNNING);
   assert.equal(projectTable.get("proj-lost")?.sandbox_status, SandboxStatus.STOPPED);
   assert.equal(projectTable.get("proj-lost")?.container_id, null);

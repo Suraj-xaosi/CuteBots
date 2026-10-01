@@ -51,7 +51,7 @@ export class Sandbox {
       "0.5",
       "--workdir",
       WORKSPACE_ROOT,
-      process.env.SANDBOX_IMAGE ?? "devin-sandbox-node:latest",
+      process.env.SANDBOX_IMAGE ?? "cutebots-sandbox-node:latest",
     ]);
 
     if (result.exitCode === 0) {

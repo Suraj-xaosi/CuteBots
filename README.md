@@ -74,49 +74,111 @@ In simple terms:
 5. Logs and status stream back to the dashboard.
 6. You can see results, retry work, or continue a paused task.
 
-## How to use it
+## How to run it
 
 ### Prerequisites
 
-You need:
-- Node.js and npm
-- Docker Desktop or Docker Engine
-- A working local environment with permission to run containers
+- Node.js 22 or newer and npm
+- Docker Desktop or Docker Engine running (sandbox containers always run in Docker)
+- A Groq API key if you want to use Groq
 
-### 1. Install dependencies
+The commands below use Windows PowerShell from the repository root.
 
-From the project root:
+### 1. Configure Groq once
 
-```sh
+Create the local environment file and open it:
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+Set these entries in `.env` (use your own Groq key; do not commit or paste it into source files):
+
+```dotenv
+LLM_PROVIDER=groq
+LLM_MODEL=openai/gpt-oss-120b
+API_KEY=your_groq_api_key
+```
+
+Generate a persistent encryption key:
+
+```powershell
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+```
+
+Copy the output into `SETTINGS_ENCRYPTION_KEY` in `.env`. Keep it unchanged while encrypted settings exist; changing it makes those secrets unreadable. The `API_KEY` entry is read as the LLM key by the agent. You can also use `LLM_API_KEY` instead.
+
+The Groq key supplied during setup was exposed in chat and should be revoked. Put a newly issued key in your local `.env`; never put a real key in `.env.example`.
+
+### 2. Build the sandbox image once
+
+Run this in either startup mode. This image is needed for project sandboxes even when the web app and agent run directly on your host:
+
+```powershell
+docker build -f infra/Dockerfile.sandbox-node -t cutebots-sandbox-node:latest .
+```
+
+### Option A: Run the web app and agent directly on Windows
+
+Install dependencies and build the agent's shared workspace packages once:
+
+```powershell
 npm install
+npm exec -- turbo run build --filter=agent... --ui=stream
 ```
 
-### 2. Build the sandbox image
+Start both the Next.js web app and agent in development/watch mode:
 
-```sh
-docker build -f infra/Dockerfile.sandbox-node -t devin-sandbox-node:latest .
+```powershell
+npm run dev
 ```
 
-### 3. Start the app
+Leave this terminal open. The web app is at http://localhost:3000 and the agent health check is at http://localhost:3001/health. Stop both with **Ctrl+C**. Docker Desktop must stay running so the agent can create sandbox containers. The agent creates the `sandbox-net` Docker network automatically when it first needs it.
 
-```sh
+### Option B: Run the web app and agent in Docker
+
+The first start builds the app images:
+
+```powershell
 docker compose up --build
 ```
 
-This starts the app stack locally.
+Wait until the web app is ready, then open http://localhost:3000. The agent health check is at http://localhost:3001/health. Both services mount the source tree and run in watch mode, so ordinary edits to `apps/web` and `apps/agent` do not require rebuilding. Start the already-built stack next time with:
 
-### 4. Open the app
+```powershell
+docker compose up
+```
 
-- Web app: http://localhost:3000
-- Agent health check: http://localhost:3001/health
+Stop the stack with **Ctrl+C** or, from another terminal:
 
-### 5. Use the dashboard
+```powershell
+docker compose down
+```
 
-- Create a project
-- Start a new task
-- Watch the logs and task state
-- Open a task details view to inspect output and usage
-- Cancel or retry when needed
+`docker compose down` keeps the database and Qdrant named volumes. Do not add `--volumes` unless you intend to delete persistent app data.
+
+### What needs a rebuild?
+
+- Editing files under `apps/web` or `apps/agent`: no image rebuild; development mode reloads them.
+- Editing shared code under `packages/`: rebuild the agent dependency chain with `npm exec -- turbo run build --filter=agent... --ui=stream`, then restart the dev process/container.
+- Changing dependencies: run `npm install` in host mode. In Docker mode, run `docker compose exec web npm install` to update the Linux dependency volumes. Rebuild app images after changing a Dockerfile.
+
+For host-run mode, restart `npm run dev` after rebuilding shared packages. In Docker mode, build shared packages in the agent container and restart it so the running agent reloads the generated output:
+
+```powershell
+docker compose exec agent npm exec -- turbo run build --filter=agent... --ui=stream
+docker compose restart agent
+```
+
+### 3. Use the dashboard
+
+- Create a project with a GitHub repository URL. Private repositories can use a read-only clone credential and a separate write token.
+- Configure the LLM provider, model, and API key with the settings button if you did not configure them in `.env`.
+- Start a task, follow its live events, inspect sandbox files, and reply to agent questions.
+- Resume paused tasks, cancel running tasks, or explicitly destroy the project sandbox.
+
+Vector memory is optional and needs a configured embedding provider/key and a reachable Qdrant service. The basic Groq setup above does not require a separate embedding key.
 
 ## Typical workflow
 
@@ -131,6 +193,8 @@ A normal workflow looks like this:
 
 ## Development notes
 
+In Docker development, Compose keeps Linux dependencies and generated files in Docker volumes while mounting the source tree for live reload. In host development, npm runs both app watchers directly, but Docker Desktop is still required for sandboxes.
+
 This repo is organized into a monorepo:
 
 - apps/web: frontend dashboard
@@ -140,9 +204,9 @@ This repo is organized into a monorepo:
 
 ## Important security note
 
-This project uses Docker from inside the agent service. That gives the agent the ability to start and manage containers on your machine.
+This project uses Docker from inside the agent service. That gives the agent the ability to start and manage containers on your machine. The web and agent ports bind to host loopback, and sandbox containers use a separate network from the agent API.
 
-This is useful for local development, but it is also a security risk if the service is exposed to untrusted networks.
+This is intended for one trusted local user, not as a multi-user service. The Docker socket remains host-level access, and code inside a sandbox is untrusted; do not expose these ports or attach the agent to networks containing untrusted containers.
 
 Keep the agent API and Docker socket private. Do not run this in a public or shared environment unless you fully understand the risks.
 

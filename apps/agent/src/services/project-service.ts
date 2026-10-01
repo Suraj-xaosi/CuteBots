@@ -133,7 +133,7 @@ export class ProjectService {
     await this.prisma.project.delete({ where: { id: projectId } });
   }
 
-  async recoverOnStartup(): Promise<void> {
+  async recoverOnStartup(): Promise<Array<{ id: string; projectId: string; description: string }>> {
     const activeProjects = await this.prisma.project.findMany({
       where: {
         status: ProjectStatus.ACTIVE,
@@ -147,7 +147,11 @@ export class ProjectService {
       },
     });
 
-    const activeProjectIds = new Set(activeProjects.map((project) => project.id));
+    const pendingTasks = await this.prisma.task.findMany({
+      where: { status: TaskStatus.PENDING },
+      orderBy: [{ created_at: "asc" }, { id: "asc" }],
+      select: { id: true, project_id: true, description: true },
+    });
 
     await this.prisma.task.updateMany({
       where: { status: TaskStatus.RUNNING },
@@ -157,6 +161,7 @@ export class ProjectService {
       },
     });
 
+    const recoveredProjectIds = new Set<string>();
     for (const project of activeProjects) {
       const recovered = await this.containers.recover(project.id);
       if (!recovered.ok) {
@@ -173,6 +178,7 @@ export class ProjectService {
 
       const attached = this.containers.get(project.id);
       const containerId = attached.ok ? attached.data.getId() : project.container_id;
+      recoveredProjectIds.add(project.id);
 
       await this.prisma.project.update({
         where: { id: project.id },
@@ -184,7 +190,19 @@ export class ProjectService {
       });
     }
 
-    await this.containers.cleanupStale(activeProjectIds);
+    const resumableTasks = pendingTasks
+      .filter((task) => recoveredProjectIds.has(task.project_id))
+      .map((task) => ({ id: task.id, projectId: task.project_id, description: task.description }));
+    const strandedTasks = pendingTasks.filter((task) => !recoveredProjectIds.has(task.project_id));
+    if (strandedTasks.length) {
+      await this.prisma.task.updateMany({
+        where: { id: { in: strandedTasks.map((task) => task.id) } },
+        data: { status: TaskStatus.FAILED, fail_reason: "Project sandbox unavailable during recovery" },
+      });
+    }
+
+    await this.containers.cleanupStale(recoveredProjectIds);
+    return resumableTasks;
   }
 
   async startSandbox(projectId: string): Promise<PublicProject> {

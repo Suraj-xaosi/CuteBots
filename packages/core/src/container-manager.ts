@@ -17,6 +17,9 @@ export class ContainerManager {
     const existing = this.sandboxes.get(projectId);
     if (existing) return { ok: true, data: existing };
 
+    const network = await this.ensureSandboxNetwork();
+    if (!network.ok) return network;
+
     const sandbox = new Sandbox(projectId);
     const result = await sandbox.create();
     if (!result.ok) return result;
@@ -92,5 +95,18 @@ export class ContainerManager {
       error: error || "Docker command failed",
       code: ErrorCode.CONTAINER_EXEC_FAILED,
     };
+  }
+
+  private async ensureSandboxNetwork(): Promise<Result<void>> {
+    const networkName = process.env.SANDBOX_NETWORK ?? "sandbox-net";
+    const inspected = await runDocker(["network", "inspect", networkName]);
+    if (inspected.exitCode === 0) return { ok: true, data: undefined };
+
+    const created = await runDocker(["network", "create", "--driver", "bridge", networkName]);
+    if (created.exitCode === 0) return { ok: true, data: undefined };
+
+    const raced = await runDocker(["network", "inspect", networkName]);
+    if (raced.exitCode === 0) return { ok: true, data: undefined };
+    return this.failure(commandError(created));
   }
 }

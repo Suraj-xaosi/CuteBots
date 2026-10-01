@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { TaskStatus } from "@workspace/types";
 import { prisma, PrismaAgentPersistence } from "@workspace/db";
 import { ContainerManager, HumanReplyInbox, SSEBroker } from "@workspace/core";
 import { createAgentApp } from "./app.js";
@@ -25,8 +26,14 @@ export async function startAgentServer(): Promise<void> {
   const containers = ContainerManager.getInstance();
   const settings = new SettingsService(prisma);
   const projects = new ProjectService(prisma, containers);
-  await projects.recoverOnStartup();
+  const pendingTasks = await projects.recoverOnStartup();
   const runtime = new AgentRuntimeFactory({ prisma, persistence, settings, containers, sseBroker, replies });
+  for (const task of pendingTasks) {
+    const enqueued = runtime.loops.enqueue(task);
+    if (!enqueued.ok) {
+      await persistence.updateTaskStatus(task.id, TaskStatus.FAILED, `Startup recovery failed: ${enqueued.error}`);
+    }
+  }
   const tasks = new TaskService(prisma, runtime.loops, replies);
 
   const taskChannelRouter = createTaskChannelRouter(sseBroker, replies, {
