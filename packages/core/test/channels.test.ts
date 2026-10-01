@@ -5,6 +5,7 @@ import type { AgentLogEvent, AgentPersistence, StoredAgentMessage } from "../src
 import { HumanReplyInbox } from "../src/channels/human-reply-inbox.js";
 import { parseLastEventId, SSEBroker, type SSEClient } from "../src/channels/sse-broker.js";
 import { TelegramChannel, TelegramGateway } from "../src/channels/telegram-channel.js";
+import { TaskChannel } from "../src/channels/task-channel.js";
 import { UIChannel } from "../src/channels/ui-channel.js";
 
 class FakeSSEClient implements SSEClient {
@@ -144,4 +145,22 @@ test("UIChannel stores a final message once and publishes its monotonic log even
   assert.equal(persistence.logs[0]?.type, "message");
   assert.match(client.chunks.join(""), /^id: 1/m);
   assert.match(client.chunks.join(""), /Task complete/);
+});
+
+test("TaskChannel notifies through the UI and resolves human questions using shared replies", async () => {
+  const persistence = new ChannelPersistence();
+  const broker = new SSEBroker(persistence);
+  const inbox = new HumanReplyInbox();
+  const ui = new UIChannel("task-1", persistence, broker, inbox);
+  const telegram = new TelegramChannel("task-1", new TelegramGateway({}, inbox));
+  const channel = new TaskChannel(ui, telegram);
+  const asking = channel.ask("Should I keep the existing API?", 5_000);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(persistence.logs[0]?.content, "Should I keep the existing API?");
+  assert.equal(inbox.submit("task-1", "Yes, keep it").ok, true);
+  assert.deepEqual(await asking, { ok: true, data: "Yes, keep it" });
+
+  await channel.sendMessage("Task completed");
+  assert.equal(persistence.logs.at(-1)?.content, "Task completed");
 });

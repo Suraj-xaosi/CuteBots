@@ -8,6 +8,7 @@ const settingNames = [
   "LLM_API_KEY",
   "TAVILY_KEY",
   "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_CHAT_ID",
   "MEMORY_LLM_PROVIDER",
   "MEMORY_LLM_MODEL",
   "MEMORY_LLM_API_KEY",
@@ -22,6 +23,7 @@ const secretNames = new Set<SettingName>([
   "LLM_API_KEY",
   "TAVILY_KEY",
   "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_CHAT_ID",
   "MEMORY_LLM_API_KEY",
   "MEMORY_EMBEDDER_API_KEY",
 ]);
@@ -67,7 +69,9 @@ export class SettingsService {
       for (const name of settingNames) {
         const setting = storedByName.get(name);
         const isSecret = secretNames.has(name);
-        const configured = Boolean(setting?.value || environmentValue(name));
+        const configured = (name === "TELEGRAM_BOT_TOKEN" || name === "TELEGRAM_CHAT_ID") && setting
+          ? Boolean(this.createVault().decrypt(setting.value))
+          : Boolean(setting?.value || environmentValue(name));
         if (isSecret) {
           configuredSecrets[name] = configured;
           continue;

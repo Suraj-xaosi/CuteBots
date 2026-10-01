@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { TaskStatus } from "@workspace/types";
 import { prisma, PrismaAgentPersistence } from "@workspace/db";
-import { ContainerManager, HumanReplyInbox, SSEBroker } from "@workspace/core";
+import { ContainerManager, HumanReplyInbox, SSEBroker, TelegramGateway } from "@workspace/core";
 import { createAgentApp } from "./app.js";
 import { createTaskChannelRouter } from "./task-channel-router.js";
 import { createProjectRouter } from "./routes/project-routes.js";
@@ -25,9 +25,23 @@ export async function startAgentServer(): Promise<void> {
   const sseBroker = new SSEBroker(persistence);
   const containers = ContainerManager.getInstance();
   const settings = new SettingsService(prisma);
+  const telegramToken = await settings.getResolved("TELEGRAM_BOT_TOKEN");
+  if (!telegramToken.ok) throw new Error(telegramToken.error);
+  const telegramChatId = await settings.getResolved("TELEGRAM_CHAT_ID");
+  if (!telegramChatId.ok) throw new Error(telegramChatId.error);
+  const telegram = new TelegramGateway({
+    botToken: telegramToken.data,
+    chatId: telegramChatId.data,
+    onChatIdChanged: async (chatId) => {
+      const saved = await settings.update({ TELEGRAM_CHAT_ID: chatId });
+      return saved.ok ? { ok: true, data: undefined } : saved;
+    },
+  }, replies);
+  const telegramStarted = await telegram.start();
+  if (!telegramStarted.ok) console.error(`Telegram bot failed to start: ${telegramStarted.error}`);
   const projects = new ProjectService(prisma, containers);
   const pendingTasks = await projects.recoverOnStartup();
-  const runtime = new AgentRuntimeFactory({ prisma, persistence, settings, containers, sseBroker, replies });
+  const runtime = new AgentRuntimeFactory({ prisma, persistence, settings, containers, sseBroker, replies, telegram });
   for (const task of pendingTasks) {
     const enqueued = runtime.loops.enqueue(task);
     if (!enqueued.ok) {
@@ -50,7 +64,7 @@ export async function startAgentServer(): Promise<void> {
     taskChannels: taskChannelRouter,
     files: createFileRouter(projects),
     sandboxes: createSandboxRouter(projects, tasks),
-    settings: createSettingsRouter(settings),
+    settings: createSettingsRouter(settings, (token) => telegram.configure(token)),
   });
   const port = parsePort(process.env.PORT);
   const server = await new Promise<ReturnType<typeof app.listen>>((resolveServer, reject) => {
@@ -59,6 +73,7 @@ export async function startAgentServer(): Promise<void> {
   });
 
   const shutdown = () => {
+    telegram.stop();
     server.close(() => {
       void prisma.$disconnect();
     });

@@ -7,6 +7,9 @@ import {
   LLMClient,
   Mem0MemoryStore,
   MemoryManager,
+  TaskChannel,
+  TelegramChannel,
+  TelegramGateway,
   ToolRegistry,
   UIChannel,
   type AgentExecutor,
@@ -25,6 +28,7 @@ export interface AgentRuntimeDependencies {
   containers: ContainerManager;
   sseBroker: SSEBroker;
   replies: HumanReplyInbox;
+  telegram: TelegramGateway;
 }
 
 export class AgentRuntimeFactory {
@@ -78,17 +82,19 @@ export class AgentRuntimeFactory {
     }
 
     const tavilyKey = unwrap(await this.dependencies.settings.getResolved("TAVILY_KEY"));
+    const uiChannel = new UIChannel(task.id, this.dependencies.persistence, this.dependencies.sseBroker, this.dependencies.replies);
+    const channel = new TaskChannel(uiChannel, new TelegramChannel(task.id, this.dependencies.telegram));
     const registry = new ToolRegistry({
       taskId: task.id,
       repositoryUrl: project.repo_url,
       githubToken,
       readOnlyCloneCredential,
       tavilyKey,
+      humanInteraction: channel,
     });
 
     const memory = await this.createMemoryManager(providerName, apiKey, model);
     const context = new ContextManager(provider, memory);
-    const channel = new UIChannel(task.id, this.dependencies.persistence, this.dependencies.sseBroker, this.dependencies.replies);
     return new AgentLoop(
       this.dependencies.persistence,
       provider,

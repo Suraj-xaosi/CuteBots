@@ -44,7 +44,7 @@ export interface TaskUsageSummary {
 
 export interface PublicSettings {
   values: { LLM_PROVIDER?: string; LLM_MODEL?: string }
-  configuredSecrets: { LLM_API_KEY?: boolean }
+  configuredSecrets: { LLM_API_KEY?: boolean; TELEGRAM_BOT_TOKEN?: boolean; TELEGRAM_CHAT_ID?: boolean }
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -180,4 +180,3 @@ export async function replyToTask(taskId: string, reply: string): Promise<void> 
     body: JSON.stringify({ reply }),
   })
 }
-
