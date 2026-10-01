@@ -1,8 +1,15 @@
-import { ErrorCode, type Result } from "@workspace/types";
 import { z } from "zod";
 import { isCommandFailure, Tool, type ToolResult } from "./tool.js";
 import type { GitPushService } from "./git-push-broker.js";
 import type { Sandbox } from "../sandbox.js";
+import {
+  isPullRequest,
+  isSafeBranch,
+  parseGitHubRepositoryUrl,
+  readApiMessage,
+  safeTaskId,
+  shellQuote,
+} from "./git-tool-utils.js";
 
 const gitArgsSchema = z.object({
   operation: z.enum(["clone", "commit", "push", "checkout", "status", "create_pr"]),
@@ -11,8 +18,6 @@ const gitArgsSchema = z.object({
   title: z.string().trim().min(1).max(256).optional(),
   body: z.string().max(65_000).optional(),
 }).strict();
-
-const GITHUB_API = "https://api.github.com";
 
 export interface GitToolOptions {
   repositoryUrl: string;
@@ -79,7 +84,7 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
   }
 
   private async clone(sandbox: Sandbox): Promise<ToolResult> {
-    const repository = this.parseRepositoryUrl();
+    const repository = parseGitHubRepositoryUrl(this.options.repositoryUrl);
     if (!repository.ok) return this.failed(repository.error);
 
     const existing = await sandbox.exec("git rev-parse --is-inside-work-tree");
@@ -87,7 +92,7 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
       return { success: true, output: "Repository is already present in the workspace" };
     }
 
-    const askpassPath = `.cutebots-askpass-${this.safeTaskId()}.sh`;
+    const askpassPath = `.cutebots-askpass-${safeTaskId(this.options.taskId)}.sh`;
     if (this.options.readOnlyCloneCredential) {
       if (/\r|\n/.test(this.options.readOnlyCloneCredential)) {
         return this.failed("Read-only clone credential contains invalid newline characters");
@@ -171,12 +176,12 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
       return this.failed(`Pull requests require the ${this.taskBranch} branch`);
     }
 
-    const repository = this.parseRepositoryUrl();
+    const repository = parseGitHubRepositoryUrl(this.options.repositoryUrl);
     if (!repository.ok) return this.failed(repository.error);
 
     try {
       const response = await this.fetcher(
-        `${GITHUB_API}/repos/${repository.data.owner}/${repository.data.name}/pulls`,
+        `https://api.github.com/repos/${repository.data.owner}/${repository.data.name}/pulls`,
         {
           method: "POST",
           headers: {
@@ -214,42 +219,6 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
       : { success: true, output };
   }
 
-  private parseRepositoryUrl(): Result<{ cloneUrl: string; owner: string; name: string }> {
-    try {
-      const url = new URL(this.options.repositoryUrl);
-      if (
-        url.protocol !== "https:" ||
-        url.hostname !== "github.com" ||
-        url.username ||
-        url.password ||
-        url.search ||
-        url.hash
-      ) {
-        return { ok: false, error: "Repository URL must be a clean HTTPS GitHub URL", code: ErrorCode.GITHUB_API_FAILED };
-      }
-      const segments = url.pathname.split("/").filter(Boolean);
-      if (segments.length !== 2) {
-        return { ok: false, error: "Repository URL must include an owner and repository", code: ErrorCode.GITHUB_API_FAILED };
-      }
-      const [ownerSegment, repositorySegment] = segments;
-      if (!ownerSegment || !repositorySegment) {
-        return { ok: false, error: "Repository URL must include an owner and repository", code: ErrorCode.GITHUB_API_FAILED };
-      }
-      const owner = ownerSegment;
-      const name = repositorySegment.replace(/\.git$/i, "");
-      if (!owner || !name || !/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(name)) {
-        return { ok: false, error: "Repository URL contains invalid path segments", code: ErrorCode.GITHUB_API_FAILED };
-      }
-      return { ok: true, data: { cloneUrl: `https://github.com/${owner}/${name}.git`, owner, name } };
-    } catch {
-      return { ok: false, error: "Repository URL is invalid", code: ErrorCode.GITHUB_API_FAILED };
-    }
-  }
-
-  private safeTaskId(): string {
-    return this.options.taskId.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 80) || "task";
-  }
-
   private redact(output: string): string {
     return [this.options.githubToken, this.options.readOnlyCloneCredential]
       .filter((token): token is string => Boolean(token))
@@ -259,27 +228,4 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
   private failed(output: string): ToolResult {
     return { success: false, output: this.redact(output) };
   }
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
-}
-
-function isSafeBranch(branch: string): boolean {
-  return /^[A-Za-z0-9_./-]+$/.test(branch) &&
-    !branch.startsWith("-") &&
-    !branch.includes("..") &&
-    !branch.endsWith("/") &&
-    !branch.includes("//");
-}
-
-function readApiMessage(data: unknown): string {
-  if (typeof data === "object" && data !== null && "message" in data && typeof data.message === "string") {
-    return data.message;
-  }
-  return "request failed";
-}
-
-function isPullRequest(data: unknown): data is { html_url: string } {
-  return typeof data === "object" && data !== null && "html_url" in data && typeof data.html_url === "string";
 }

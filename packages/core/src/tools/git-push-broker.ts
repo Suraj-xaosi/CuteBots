@@ -3,6 +3,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Sandbox } from "../sandbox.js";
+import { shellQuote } from "./git-tool-utils.js";
 import type { ToolResult } from "./tool.js";
 
 const MAX_GIT_OUTPUT_BYTES = 1_000_000;
@@ -158,8 +159,4 @@ function createCredentialHelper(token: string): string {
 
 function isSafeTaskId(taskId: string): boolean {
   return /^[A-Za-z0-9_-]{1,100}$/.test(taskId);
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
