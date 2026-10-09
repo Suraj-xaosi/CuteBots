@@ -5,10 +5,10 @@
   "private": true,
   "scripts": {
     "predev": "npm run db:deploy --workspace=@workspace/db",
-    "dev": "tsx watch src/server.ts",
+    "dev": "node --env-file=../../.env --import tsx --watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "prestart": "npm run db:deploy --workspace=@workspace/db",
-    "start": "node dist/server.js",
+    "start": "node --env-file=../../.env dist/server.js",
     "test": "tsx --test",
     "typecheck": "tsc --noEmit"
   },

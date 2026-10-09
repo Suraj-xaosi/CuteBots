@@ -26,8 +26,18 @@ export class SecretVault {
   }
 
   decrypt(value: string): string {
-    const [prefix, encodedIv, encodedTag, encodedCiphertext] = value.split(":");
-    if (prefix !== ENCRYPTION_PREFIX || !encodedIv || !encodedTag || encodedCiphertext === undefined) {
+    const parts = value.split(":");
+    const prefix = parts.slice(0, 2).join(":");
+    const encodedIv = parts[2];
+    const encodedTag = parts[3];
+    const encodedCiphertext = parts[4];
+    if (
+      prefix !== ENCRYPTION_PREFIX ||
+      parts.length !== 5 ||
+      !encodedIv ||
+      !encodedTag ||
+      encodedCiphertext === undefined
+    ) {
       throw new Error("Stored secret has an unsupported encryption format");
     }
 
