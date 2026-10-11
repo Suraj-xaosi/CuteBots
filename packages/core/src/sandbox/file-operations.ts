@@ -186,8 +186,10 @@ export class SandboxFileOperations {
       const ownership = await runDocker([
         "exec",
         containerId,
-        "chown",
-        "node:node",
+        "sh",
+        "-c",
+        'chown "$(id -u):$(id -g)" "$1"',
+        "sandbox-chown",
         absolutePath,
       ]);
       if (ownership.exitCode !== 0) {

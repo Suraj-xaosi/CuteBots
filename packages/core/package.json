@@ -6,7 +6,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test"
+    "test": "tsx --test",
+    "eval:typecheck": "tsc --project tsconfig.evals.json",
+    "eval": "npm run eval:typecheck && tsx evals/run-evals.ts",
+    "eval:ci": "npm run eval:typecheck && tsx evals/run-evals.ts --ci"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",

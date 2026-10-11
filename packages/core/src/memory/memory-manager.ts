@@ -11,9 +11,11 @@ export type MemoryOperation =
   | "search_task"
   | "search_project";
 
-export type MemoryErrorHandler = (operation: MemoryOperation, error: unknown) => void;
+export type MemoryErrorHandler = (operation: MemoryOperation, error: unknown) => void | Promise<void>;
 
 export class MemoryManager {
+  private captureQueue: Promise<void> = Promise.resolve();
+
   constructor(
     private readonly store?: MemoryStore,
     private readonly onError?: MemoryErrorHandler,
@@ -27,6 +29,14 @@ export class MemoryManager {
   async captureProjectSummary(input: ProjectMemoryInput): Promise<void> {
     if (!this.store) return;
     await this.runSafely("capture_project_summary", () => this.store!.captureProjectSummary(input));
+  }
+
+  enqueueTaskToolResult(input: ToolMemoryInput): void {
+    this.enqueueCapture(() => this.captureTaskToolResult(input));
+  }
+
+  enqueueProjectSummary(input: ProjectMemoryInput): void {
+    this.enqueueCapture(() => this.captureProjectSummary(input));
   }
 
   async searchTask(taskId: string, query: string, limit = 5): Promise<MemoryFact[]> {
@@ -56,12 +66,20 @@ export class MemoryManager {
       return await action();
     } catch (error) {
       try {
-        this.onError?.(operation, error);
-      } catch {
-        // Error reporting must not interfere with the agent loop.
+        await this.onError?.(operation, error);
+      } catch (reportingError) {
+        console.error(`Memory error handler failed for ${operation}:`, reportingError);
       }
       return fallback as T;
     }
+  }
+
+  private enqueueCapture(capture: () => Promise<void>): void {
+    this.captureQueue = this.captureQueue
+      .then(capture)
+      .catch((error: unknown) => {
+        console.error("Unexpected queued memory capture failure:", error);
+      });
   }
 }
 

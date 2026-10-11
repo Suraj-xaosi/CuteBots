@@ -1,106 +1,116 @@
 export const COMMAND_JOB_MAX_AGE_MS = 24 * 60 * 60 * 1_000;
 
 export const COMMAND_JOB_START_SCRIPT = `
-const fs = require('node:fs');
-const path = require('node:path');
-const { spawn } = require('node:child_process');
-const id = process.argv[1];
-const command = process.argv[2];
-const outputLimit = Number(process.argv[3]);
-const root = '/tmp/cutebots-command-jobs';
-const directory = path.join(root, id);
-fs.mkdirSync(root, { recursive: true });
-for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-  const entryPath = path.join(root, entry.name);
-  try {
-    if (Date.now() - fs.statSync(entryPath).mtimeMs > ${COMMAND_JOB_MAX_AGE_MS}) fs.rmSync(entryPath, { recursive: true, force: true });
-  } catch {}
-}
-fs.mkdirSync(directory, { recursive: true });
-fs.writeFileSync(path.join(directory, 'created'), String(Date.now()));
-fs.writeFileSync(path.join(directory, 'status'), 'running');
-const outputPath = path.join(directory, 'output');
-const child = spawn('bash', ['-lc', command], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
-fs.writeFileSync(path.join(directory, 'pid'), String(child.pid));
-let written = 0;
-for (const stream of [child.stdout, child.stderr]) {
-  stream.on('data', (chunk) => {
-    const remaining = outputLimit - written;
-    if (remaining > 0) {
-      const kept = chunk.subarray(0, remaining);
-      fs.appendFileSync(outputPath, kept);
-      written += kept.length;
-    }
-    if (chunk.length > remaining) fs.writeFileSync(path.join(directory, 'truncated'), '1');
-  });
-}
-let timedOut = false;
-const timeout = setTimeout(() => {
-  timedOut = true;
-  try { process.kill(-child.pid, 'SIGTERM'); } catch {}
-  setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }, 5000).unref();
-}, 30 * 60 * 1000);
-child.on('error', (error) => {
-  fs.writeFileSync(outputPath, String(error));
-  fs.writeFileSync(path.join(directory, 'exit'), '127');
-  fs.writeFileSync(path.join(directory, 'status'), 'failed');
-  clearTimeout(timeout);
-});
-child.on('close', (code) => {
-  clearTimeout(timeout);
-  fs.writeFileSync(path.join(directory, 'exit'), String(code ?? 1));
-  const cancelled = fs.existsSync(path.join(directory, 'cancel-requested'));
-  fs.writeFileSync(path.join(directory, 'status'), timedOut ? 'timed_out' : cancelled ? 'cancelled' : code === 0 ? 'completed' : 'failed');
-});
+set -u
+job_id="$1"
+command="$2"
+output_limit="$3"
+timeout_seconds="$4"
+root=/tmp/cutebots-command-jobs
+directory="$root/$job_id"
+mkdir -p "$root"
+find "$root" -mindepth 1 -maxdepth 1 -type d -mmin +1440 -exec rm -rf -- {} + 2>/dev/null || true
+mkdir -p "$directory"
+date +%s > "$directory/created"
+printf running > "$directory/status"
+: > "$directory/output"
+setsid bash -lc "$command" > "$directory/output" 2>&1 &
+child_pid=$!
+printf '%s' "$child_pid" > "$directory/pid"
+(
+  started_at=$(date +%s)
+  while kill -0 "$child_pid" 2>/dev/null; do
+    now=$(date +%s)
+    if [ "$((now - started_at))" -ge "$timeout_seconds" ]; then
+      : > "$directory/timed-out"
+      kill -TERM -- "-$child_pid" 2>/dev/null || true
+      sleep 5
+      kill -KILL -- "-$child_pid" 2>/dev/null || true
+      break
+    fi
+    output_size=$(wc -c < "$directory/output")
+    if [ "$output_size" -gt "$output_limit" ]; then
+      head -c "$output_limit" "$directory/output" > "$directory/output.trimmed"
+      mv "$directory/output.trimmed" "$directory/output"
+      : > "$directory/truncated"
+    fi
+    sleep 1
+  done
+) &
+monitor_pid=$!
+wait "$child_pid"
+exit_code=$?
+kill "$monitor_pid" 2>/dev/null || true
+wait "$monitor_pid" 2>/dev/null || true
+output_size=$(wc -c < "$directory/output")
+if [ "$output_size" -gt "$output_limit" ]; then
+  head -c "$output_limit" "$directory/output" > "$directory/output.trimmed"
+  mv "$directory/output.trimmed" "$directory/output"
+  : > "$directory/truncated"
+fi
+printf '%s' "$exit_code" > "$directory/exit"
+if [ -f "$directory/timed-out" ]; then
+  printf timed_out > "$directory/status"
+elif [ -f "$directory/cancel-requested" ]; then
+  printf cancelled > "$directory/status"
+elif [ "$exit_code" -eq 0 ]; then
+  printf completed > "$directory/status"
+else
+  printf failed > "$directory/status"
+fi
 `;
 
 export const COMMAND_JOB_POLL_SCRIPT = `
-const fs = require('node:fs');
-const path = require('node:path');
-const id = process.argv[1];
-const offset = Number(process.argv[2]);
-const limit = Number(process.argv[3]);
-const maxAge = Number(process.argv[4]);
-const directory = path.join('/tmp/cutebots-command-jobs', id);
-if (!fs.existsSync(directory)) { process.stderr.write('Unknown or expired command job'); process.exit(2); }
-const created = Number(fs.readFileSync(path.join(directory, 'created'), 'utf8'));
-if (Date.now() - created > maxAge) { fs.rmSync(directory, { recursive: true, force: true }); process.stderr.write('Unknown or expired command job'); process.exit(2); }
-const outputPath = path.join(directory, 'output');
-const size = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;
-const available = Math.max(0, Math.min(size - offset, limit));
-let output = '';
-if (available > 0) {
-  const fd = fs.openSync(outputPath, 'r');
-  const buffer = Buffer.alloc(available);
-  fs.readSync(fd, buffer, 0, available, offset);
-  fs.closeSync(fd);
-  output = buffer.toString('utf8');
-}
-const status = fs.readFileSync(path.join(directory, 'status'), 'utf8');
-const exitPath = path.join(directory, 'exit');
-process.stdout.write(JSON.stringify({
-  jobId: id,
-  status,
-  output,
-  nextOffset: offset + available,
-  exitCode: fs.existsSync(exitPath) ? Number(fs.readFileSync(exitPath, 'utf8')) : null,
-  outputTruncated: fs.existsSync(path.join(directory, 'truncated')),
-}));
+set -u
+job_id="$1"
+offset="$2"
+limit="$3"
+max_age_ms="$4"
+directory="/tmp/cutebots-command-jobs/$job_id"
+if [ ! -d "$directory" ]; then
+  printf 'Unknown or expired command job' >&2
+  exit 2
+fi
+created=$(cat "$directory/created")
+now=$(date +%s)
+if [ "$((now - created))" -gt "$((max_age_ms / 1000))" ]; then
+  rm -rf -- "$directory"
+  printf 'Unknown or expired command job' >&2
+  exit 2
+fi
+output_size=$(wc -c < "$directory/output")
+available=$((output_size - offset))
+if [ "$available" -lt 0 ]; then available=0; fi
+if [ "$available" -gt "$limit" ]; then available="$limit"; fi
+if [ "$available" -gt 0 ]; then
+  output=$(tail -c "+$((offset + 1))" "$directory/output" | head -c "$available" | base64 -w 0)
+else
+  output=""
+fi
+status=$(cat "$directory/status")
+exit_code=null
+if [ -f "$directory/exit" ]; then exit_code=$(cat "$directory/exit"); fi
+truncated=false
+if [ -f "$directory/truncated" ]; then truncated=true; fi
+printf '{"jobId":"%s","status":"%s","outputBase64":"%s","nextOffset":%s,"exitCode":%s,"outputTruncated":%s}' \\
+  "$job_id" "$status" "$output" "$((offset + available))" "$exit_code" "$truncated"
 `;
 
 export const COMMAND_JOB_CANCEL_SCRIPT = `
-const fs = require('node:fs');
-const path = require('node:path');
-const directory = path.join('/tmp/cutebots-command-jobs', process.argv[1]);
-if (!fs.existsSync(directory)) { process.stderr.write('Unknown or expired command job'); process.exit(2); }
-const statusPath = path.join(directory, 'status');
-if (fs.readFileSync(statusPath, 'utf8') !== 'running') process.exit(0);
-fs.writeFileSync(path.join(directory, 'cancel-requested'), '1');
-const pid = Number(fs.readFileSync(path.join(directory, 'pid'), 'utf8'));
-try { process.kill(-pid, 'SIGTERM'); } catch {}
-for (let attempt = 0; attempt < 50; attempt++) {
-  try { process.kill(-pid, 0); } catch { process.exit(0); }
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
-}
-try { process.kill(-pid, 'SIGKILL'); } catch {}
+set -u
+job_id="$1"
+directory="/tmp/cutebots-command-jobs/$job_id"
+if [ ! -d "$directory" ]; then
+  printf 'Unknown or expired command job' >&2
+  exit 2
+fi
+if [ "$(cat "$directory/status")" != running ]; then exit 0; fi
+: > "$directory/cancel-requested"
+child_pid=$(cat "$directory/pid")
+kill -TERM -- "-$child_pid" 2>/dev/null || true
+for attempt in $(seq 1 50); do
+  if ! kill -0 -- "-$child_pid" 2>/dev/null; then exit 0; fi
+  sleep 0.1
+done
+kill -KILL -- "-$child_pid" 2>/dev/null || true
 `;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ErrorCode, type LLMMessage } from "@workspace/types";
+import { ErrorCode, type LLMMessage, type LLMProvider } from "@workspace/types";
 import { AnthropicProvider } from "../src/llm/anthropic-provider.js";
 import { LLMClient } from "../src/llm/llm-client.js";
 import { GroqProvider, OpenAIProvider } from "../src/llm/openai-providers.js";
@@ -28,6 +28,34 @@ const conversation: LLMMessage[] = [
   },
   { role: "tool", tool_call_id: "call-1", content: "/workspace" },
 ];
+
+async function assertProviderRequestAborts(
+  createProvider: (fetcher: typeof fetch) => LLMProvider,
+): Promise<void> {
+  let requestStartedResolve: (() => void) | undefined;
+  const requestStarted = new Promise<void>((resolve) => { requestStartedResolve = resolve; });
+  let requestSignal: AbortSignal | undefined;
+  const provider = createProvider(mockFetch((request) => {
+    requestSignal = request.signal;
+    requestStartedResolve?.();
+    return new Promise<Response>((_resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Provider request was not aborted")), 5_000);
+      request.signal.addEventListener("abort", () => {
+        clearTimeout(timeout);
+        reject(new DOMException("Provider request aborted", "AbortError"));
+      }, { once: true });
+    });
+  }));
+  const controller = new AbortController();
+  const pending = provider.chat([], [], "system", controller.signal);
+
+  await requestStarted;
+  controller.abort();
+  const result = await pending;
+
+  assert.equal(requestSignal?.aborted, true);
+  assert.equal(result.ok, false);
+}
 
 test("OpenAI normalizes tool calls and replays assistant/tool history", async () => {
   let requestBody: Record<string, unknown> | undefined;
@@ -113,6 +141,18 @@ test("Anthropic coalesces tool results and normalizes text, calls, and usage", a
   assert.equal(requestBody?.system, "You are a coding agent");
 });
 
+test("OpenAI and Anthropic abort their active HTTP request when signaled", async () => {
+  await assertProviderRequestAborts((fetcher) => new OpenAIProvider({
+    provider: "openai",
+    apiKey: "test-openai-key",
+    fetcher,
+  }));
+  await assertProviderRequestAborts((fetcher) => new AnthropicProvider({
+    apiKey: "test-anthropic-key",
+    fetcher,
+  }));
+});
+
 test("provider errors normalize rate limits, invalid keys, and context overflow", async () => {
   const rateLimited = new OpenAIProvider({
     provider: "openai",
@@ -129,18 +169,45 @@ test("provider errors normalize rate limits, invalid keys, and context overflow"
     apiKey: "key",
     fetcher: mockFetch(async () => jsonResponse({ error: { message: "maximum context length exceeded" } }, 400)),
   });
+  const permanentRequestError = new OpenAIProvider({
+    provider: "openai",
+    apiKey: "key",
+    fetcher: mockFetch(async () => jsonResponse({ error: { message: "invalid request" } }, 400)),
+  });
 
   const rateResult = await rateLimited.chat([], [], "system");
   const keyResult = await invalidKey.chat([], [], "system");
   const contextResult = await contextOverflow.chat([], [], "system");
+  const requestResult = await permanentRequestError.chat([], [], "system");
 
   assert.equal(rateResult.ok, false);
   assert.equal(keyResult.ok, false);
   assert.equal(contextResult.ok, false);
-  if (!rateResult.ok && !keyResult.ok && !contextResult.ok) {
+  assert.equal(requestResult.ok, false);
+  if (!rateResult.ok && !keyResult.ok && !contextResult.ok && !requestResult.ok) {
     assert.equal(rateResult.code, ErrorCode.LLM_RATE_LIMIT);
     assert.equal(keyResult.code, ErrorCode.INVALID_API_KEY);
     assert.equal(contextResult.code, ErrorCode.LLM_CONTEXT_OVERFLOW);
+    assert.equal(requestResult.code, ErrorCode.LLM_REQUEST_ERROR);
+  }
+});
+
+test("provider maps Retry-After headers to milliseconds", async () => {
+  const provider = new OpenAIProvider({
+    provider: "openai",
+    apiKey: "key",
+    fetcher: mockFetch(async () => new Response(
+      JSON.stringify({ error: { message: "rate limit" } }),
+      { status: 429, headers: { "Retry-After": "2.5", "Content-Type": "application/json" } },
+    )),
+  });
+
+  const result = await provider.chat([], [], "system");
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.code, ErrorCode.LLM_RATE_LIMIT);
+    assert.equal(result.retryAfterMs, 2_500);
   }
 });
 

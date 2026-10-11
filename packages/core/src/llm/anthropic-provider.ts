@@ -42,6 +42,7 @@ export class AnthropicProvider implements LLMProvider {
     messages: LLMMessage[],
     tools: ToolDefinition[],
     systemPrompt: string,
+    signal?: AbortSignal
   ): Promise<Result<LLMResponse>> {
     try {
       const response = await this.client.messages.create({
@@ -50,7 +51,7 @@ export class AnthropicProvider implements LLMProvider {
         system: systemPrompt,
         messages: toAnthropicMessages(messages),
         tools: tools.length ? toAnthropicTools(tools) : undefined,
-      });
+      }, { signal });
 
       const toolCalls: ToolCall[] = [];
       const text: string[] = [];

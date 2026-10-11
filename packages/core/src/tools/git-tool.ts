@@ -2,6 +2,8 @@ import { z } from "zod";
 import { isCommandFailure, Tool, type ToolResult } from "./tool.js";
 import type { GitPushService } from "./git-push-broker.js";
 import type { Sandbox } from "../sandbox.js";
+import type { HumanInteraction } from "./ask-human-tool.js";
+import { redactTextSecrets } from "../security/secret-redaction.js";
 import {
   isPullRequest,
   isSafeBranch,
@@ -25,8 +27,12 @@ export interface GitToolOptions {
   githubToken?: string;
   readOnlyCloneCredential?: string;
   pushBroker?: GitPushService;
+  humanInteraction?: HumanInteraction;
+  baseBranch?: string;
   fetcher?: typeof fetch;
 }
+
+const DELIVERY_APPROVAL_TIMEOUT_MS = 10 * 60 * 1_000;
 
 export class GitTool extends Tool<typeof gitArgsSchema> {
   readonly name = "git_operation";
@@ -34,16 +40,26 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
   protected readonly schema = gitArgsSchema;
   private readonly taskBranch: string;
   private readonly fetcher: typeof fetch;
+  private verifiedEvidence: string | undefined;
+  private verifiedChangedFiles: string[] = [];
+  private readonly baseBranch: string;
 
   constructor(private readonly options: GitToolOptions) {
     super();
     this.taskBranch = `agent/${options.taskId}`;
     this.fetcher = options.fetcher ?? fetch;
+    this.baseBranch = options.baseBranch?.trim() || "main";
+  }
+
+  setVerifiedEvidence(evidence?: string, changedFiles: string[] = []): void {
+    this.verifiedEvidence = evidence;
+    this.verifiedChangedFiles = changedFiles;
   }
 
   protected async executeValidated(
     args: z.output<typeof gitArgsSchema>,
     sandbox: Sandbox,
+    signal?: AbortSignal,
   ): Promise<ToolResult> {
     switch (args.operation) {
       case "clone":
@@ -51,29 +67,30 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
       case "commit":
         return this.commit(sandbox, args.message);
       case "push":
-        return this.push(sandbox, args.branch);
+        return this.push(sandbox, args.branch, signal);
       case "checkout":
         return this.checkout(sandbox, args.branch);
       case "status":
         return this.runGit(sandbox, "git status --short --branch");
       case "create_pr":
-        return this.createPullRequest(sandbox, args.title, args.body, args.branch);
+        return this.createPullRequest(sandbox, args.title, args.body, args.branch, signal);
     }
   }
 
   async prepareWorkspace(sandbox: Sandbox, workspaceReady: boolean): Promise<ToolResult> {
+    if (!isSafeBranch(this.baseBranch)) return this.failed("Configured base branch is invalid");
     let warning = "";
     if (!workspaceReady) {
       const cloned = await this.clone(sandbox);
       if (!cloned.success) return cloned;
     } else {
-      const checkoutMain = await this.runGit(sandbox, "git switch main");
+      const checkoutMain = await this.runGit(sandbox, `git switch ${this.baseBranch}`);
       if (!checkoutMain.success) {
-        warning = "WARNING: could not switch to main; creating the task branch from the current checkout. ";
+        warning = `WARNING: could not switch to ${this.baseBranch}; creating the task branch from the current checkout. `;
       } else {
-        const pulled = await this.runGit(sandbox, "git pull --ff-only origin main");
+        const pulled = await this.runGit(sandbox, `git pull --ff-only origin ${this.baseBranch}`);
         if (!pulled.success) {
-          warning = "WARNING: git pull failed; creating the task branch from the last known main. ";
+          warning = `WARNING: git pull failed; creating the task branch from the last known ${this.baseBranch}. `;
         }
       }
     }
@@ -81,6 +98,10 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
     const branch = await this.runGit(sandbox, `git switch --create ${shellQuote(this.taskBranch)}`);
     if (!branch.success) return branch;
     return { success: true, output: `${warning}Workspace ready on ${this.taskBranch}`.trim() };
+  }
+
+  async cloneRepository(sandbox: Sandbox): Promise<ToolResult> {
+    return this.clone(sandbox);
   }
 
   private async clone(sandbox: Sandbox): Promise<ToolResult> {
@@ -131,13 +152,21 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
 
   private async commit(sandbox: Sandbox, message?: string): Promise<ToolResult> {
     if (!message) return this.failed("A commit message is required");
+    if (!this.verifiedEvidence) return this.failed("Commit is blocked until the changed files pass the verification gate");
+    if (this.verifiedChangedFiles.length === 0) return this.failed("Commit is blocked because verification found no task-owned changed files");
+    const verifiedMessage = redactTextSecrets([
+      message,
+      "",
+      "Verification evidence:",
+      this.verifiedEvidence,
+    ].join("\n"));
     return this.runGit(
       sandbox,
-      `git add -A && git commit -m ${shellQuote(message)}`,
+      `git add -- ${this.verifiedChangedFiles.map(shellQuote).join(" ")} && git commit -m ${shellQuote(verifiedMessage)}`,
     );
   }
 
-  private async push(sandbox: Sandbox, requestedBranch?: string): Promise<ToolResult> {
+  private async push(sandbox: Sandbox, requestedBranch?: string, signal?: AbortSignal): Promise<ToolResult> {
     if (requestedBranch && requestedBranch !== this.taskBranch) {
       return this.failed(`Pushes are restricted to ${this.taskBranch}`);
     }
@@ -149,6 +178,12 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
     if (!this.options.pushBroker) {
       return this.failed("Host-side Git push broker is not configured; sandbox cannot push directly");
     }
+    if (!this.verifiedEvidence) return this.failed("Push is blocked until the changed files pass the verification gate");
+    const approval = await this.requestDeliveryApproval(
+      `push branch ${this.taskBranch} to the repository`,
+      signal,
+    );
+    if (approval) return approval;
     const result = await this.options.pushBroker.push(this.options.taskId, this.taskBranch, sandbox);
     return { success: result.success, output: this.redact(result.output) };
   }
@@ -163,6 +198,7 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
     title?: string,
     body?: string,
     requestedBranch?: string,
+    signal?: AbortSignal,
   ): Promise<ToolResult> {
     if (!this.options.githubToken) return this.failed("GitHub token is not configured");
     if (!title) return this.failed("A pull request title is required");
@@ -175,9 +211,20 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
     if (branch.data.trim() !== this.taskBranch) {
       return this.failed(`Pull requests require the ${this.taskBranch} branch`);
     }
+    if (!this.verifiedEvidence) return this.failed("Pull request creation is blocked until the changed files pass the verification gate");
 
     const repository = parseGitHubRepositoryUrl(this.options.repositoryUrl);
     if (!repository.ok) return this.failed(repository.error);
+    const detectedBase = await sandbox.exec("git symbolic-ref --quiet --short refs/remotes/origin/HEAD");
+    const remoteHead = detectedBase.ok ? detectedBase.data.trim() : "";
+    const remoteBase = remoteHead.startsWith("origin/") ? remoteHead.slice("origin/".length) : "";
+    const baseBranch = isSafeBranch(remoteBase) ? remoteBase : this.baseBranch;
+    if (!isSafeBranch(baseBranch)) return this.failed("Configured pull request base branch is invalid");
+    const approval = await this.requestDeliveryApproval(
+      `create a pull request from ${this.taskBranch} into ${baseBranch}`,
+      signal,
+    );
+    if (approval) return approval;
 
     try {
       const response = await this.fetcher(
@@ -192,9 +239,14 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
           },
           body: JSON.stringify({
             title,
-            body: body ?? "",
+            body: redactTextSecrets([
+              body?.trim(),
+              "## CuteBots verification evidence",
+              `Base branch: ${baseBranch}`,
+              this.verifiedEvidence,
+            ].filter(Boolean).join("\n\n")),
             head: this.taskBranch,
-            base: "main",
+            base: baseBranch,
           }),
           signal: AbortSignal.timeout(15_000),
         },
@@ -208,6 +260,22 @@ export class GitTool extends Tool<typeof gitArgsSchema> {
     } catch (error) {
       return this.failed(error instanceof Error ? error.message : "GitHub API request failed");
     }
+  }
+
+  private async requestDeliveryApproval(target: string, signal?: AbortSignal): Promise<ToolResult | undefined> {
+    if (!this.options.humanInteraction) {
+      return this.failed("Delivery is blocked because an explicit user approval channel is unavailable");
+    }
+    const approval = await this.options.humanInteraction.ask(
+      `Approve ${target}? Reply exactly APPROVE to continue; any other reply cancels the action.`,
+      DELIVERY_APPROVAL_TIMEOUT_MS,
+      signal,
+    );
+    if (!approval.ok) return this.failed(`Delivery approval was not received: ${approval.error}`);
+    if (approval.data.trim().toUpperCase() !== "APPROVE") {
+      return this.failed("Delivery was not approved; no remote operation was performed");
+    }
+    return undefined;
   }
 
   private async runGit(sandbox: Sandbox, command: string): Promise<ToolResult> {

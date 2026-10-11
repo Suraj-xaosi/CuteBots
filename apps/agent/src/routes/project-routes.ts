@@ -9,7 +9,7 @@ const createProjectSchema = z.object({
   repo_url: z.string().url().max(2_000),
   github_token: z.string().min(8).max(500).optional(),
   clone_credential: z.string().min(1).max(500).optional(),
-  sandbox_type: z.literal("node").optional(),
+  sandbox_type: z.enum(["node", "minimal"]).default("node"),
 }).strict();
 
 const createTaskSchema = z.object({
@@ -38,6 +38,16 @@ export function createProjectRouter(projects: ProjectService, tasks: TaskService
     }
     const cursor = request.query.cursor === undefined ? undefined : parseId(String(request.query.cursor), "cursor");
     response.json({ tasks: await tasks.list(projectId, limit, cursor) });
+  });
+
+  router.post("/:projectId/setup/retry", async (request, response) => {
+    const projectId = parseId(request.params.projectId, "project id");
+    response.status(202).json({ project: await projects.retrySetup(projectId) });
+  });
+
+  router.post("/:projectId/setup/switch-to-node", async (request, response) => {
+    const projectId = parseId(request.params.projectId, "project id");
+    response.status(202).json({ project: await projects.switchToNodeSandbox(projectId) });
   });
 
   router.post("/:projectId/tasks", async (request, response) => {

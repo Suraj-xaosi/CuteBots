@@ -20,6 +20,11 @@ model Project {
   sandbox_status  SandboxStatus   @default(STOPPED)
   sandbox_type    String          @default("node")
   workspace_ready Boolean         @default(false)
+  setup_status    String          @default("PENDING")
+  setup_log       String          @default("")
+  setup_error     String?
+  setup_attempts  Int             @default(0)
+  detected_setup  String?
   created_at      DateTime        @default(now())
   tasks           Task[]
   messages        Message[]
@@ -111,6 +116,7 @@ enum TaskStatus {
   RUNNING
   PAUSED
   DONE
+  UNVERIFIED
   FAILED
   CANCELLED
 }

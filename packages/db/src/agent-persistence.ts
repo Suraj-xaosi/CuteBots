@@ -119,6 +119,19 @@ export class PrismaAgentPersistence implements AgentPersistence {
     });
   }
 
+  async loadTokenUsage(taskId: string): Promise<Result<{ inputTokens: number; outputTokens: number }>> {
+    return this.runSafely(async () => {
+      const usage = await this.prisma.tokenUsage.aggregate({
+        where: { task_id: taskId },
+        _sum: { input_tokens: true, output_tokens: true },
+      });
+      return {
+        inputTokens: Number(usage._sum.input_tokens ?? 0),
+        outputTokens: Number(usage._sum.output_tokens ?? 0),
+      };
+    });
+  }
+
   private async runSafely<T>(operation: () => Promise<T>): Promise<Result<T>> {
     try {
       return { ok: true, data: await operation() };
@@ -139,6 +152,7 @@ function toDatabaseTaskStatus(status: TaskStatus): DatabaseTaskStatus {
     case TaskStatus.RUNNING: return DatabaseTaskStatus.RUNNING;
     case TaskStatus.PAUSED: return DatabaseTaskStatus.PAUSED;
     case TaskStatus.DONE: return DatabaseTaskStatus.DONE;
+    case TaskStatus.UNVERIFIED: return DatabaseTaskStatus.UNVERIFIED;
     case TaskStatus.FAILED: return DatabaseTaskStatus.FAILED;
     case TaskStatus.CANCELLED: return DatabaseTaskStatus.CANCELLED;
   }
@@ -165,6 +179,9 @@ function toAgentLogType(type: string): AgentLogEvent["type"] {
     case "thinking":
     case "tool_call":
     case "tool_result":
+    case "tool_failure":
+    case "plan":
+    case "evidence":
     case "warn":
     case "error":
     case "status":
@@ -181,4 +198,3 @@ function prismaErrorCode(error: unknown): ErrorCode {
   }
   return ErrorCode.TOOL_EXECUTION_FAILED;
 }
-

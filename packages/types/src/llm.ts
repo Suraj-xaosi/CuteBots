@@ -27,6 +27,7 @@ export interface LLMProvider {
     messages: LLMMessage[],
     tools: ToolDefinition[],
     systemPrompt: string,
+    signal?: AbortSignal
   ): Promise<import("./result.js").Result<LLMResponse>>;
   countTokens(messages: LLMMessage[]): Promise<number>;
   maxContextTokens: number;

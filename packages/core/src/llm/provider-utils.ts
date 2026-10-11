@@ -36,14 +36,41 @@ export function mapProviderError(error: unknown, apiKey?: string): Result<never>
     code = ErrorCode.INVALID_API_KEY;
   } else if (/context.{0,30}(length|window|limit)|too many tokens|maximum context/i.test(message)) {
     code = ErrorCode.LLM_CONTEXT_OVERFLOW;
+  } else if (status !== undefined && status >= 400 && status < 500 && ![408, 409, 425].includes(status)) {
+    code = ErrorCode.LLM_REQUEST_ERROR;
   }
 
-  return { ok: false, error: message || "LLM provider request failed", code };
+  const retryAfterMs = readRetryAfterMs(error);
+  return {
+    ok: false,
+    error: message || "LLM provider request failed",
+    code,
+    ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+  };
 }
 
 function readStatus(error: unknown): number | undefined {
   if (typeof error !== "object" || error === null || !("status" in error)) return undefined;
   return typeof error.status === "number" ? error.status : undefined;
+}
+
+function readRetryAfterMs(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null || !("headers" in error)) return undefined;
+  const headers = error.headers;
+  let value: string | null | undefined;
+  if (headers instanceof Headers) {
+    value = headers.get("retry-after");
+  } else if (typeof headers === "object" && headers !== null) {
+    const record = headers as Record<string, unknown>;
+    const header = record["retry-after"] ?? record["Retry-After"];
+    if (typeof header === "string" || typeof header === "number") value = String(header);
+  }
+  if (!value) return undefined;
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1_000);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
 }
 
 export function mapOpenAIFinishReason(reason: string | null): "stop" | "tool_use" | "length" | "error" {
@@ -59,4 +86,3 @@ export function mapAnthropicStopReason(reason: string | null): "stop" | "tool_us
   if (reason === "end_turn" || reason === "stop_sequence") return "stop";
   return "error";
 }
-

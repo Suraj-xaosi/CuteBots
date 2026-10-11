@@ -99,16 +99,90 @@ test("MemoryManager treats store and error-handler failures as non-fatal", async
     throw new Error("logger failure");
   });
 
-  await assert.doesNotReject(() => manager.captureTaskToolResult({
+  const originalConsoleError = console.error;
+  const loggedHandlerErrors: unknown[] = [];
+  console.error = (...args: unknown[]) => { loggedHandlerErrors.push(args[1]); };
+  try {
+    await assert.doesNotReject(() => manager.captureTaskToolResult({
+      projectId: "project-1",
+      taskId: "task-1",
+      toolName: "run_command",
+      arguments: {},
+      success: false,
+      output: "offline",
+    }));
+    assert.deepEqual(await manager.searchProject("project-1", "fact"), []);
+  } finally {
+    console.error = originalConsoleError;
+  }
+  assert.deepEqual(errors, ["capture_task_tool_result", "search_project"]);
+  assert.equal(loggedHandlerErrors.length, 2);
+});
+
+test("MemoryManager awaits async error reporting", async () => {
+  const failingStore: MemoryStore = {
+    captureTaskToolResult: async () => { throw new Error("offline"); },
+    captureProjectSummary: async () => undefined,
+    searchTask: async () => [],
+    searchProject: async () => [],
+  };
+  const reports: string[] = [];
+  const manager = new MemoryManager(failingStore, async (operation, error) => {
+    await Promise.resolve();
+    reports.push(`${operation}:${error instanceof Error ? error.message : "unknown"}`);
+  });
+
+  await manager.captureTaskToolResult({
     projectId: "project-1",
     taskId: "task-1",
     toolName: "run_command",
     arguments: {},
     success: false,
     output: "offline",
-  }));
-  assert.deepEqual(await manager.searchProject("project-1", "fact"), []);
-  assert.deepEqual(errors, ["capture_task_tool_result", "search_project"]);
+  });
+
+  assert.deepEqual(reports, ["capture_task_tool_result:offline"]);
+});
+
+test("MemoryManager serializes queued captures without waiting in the caller", async () => {
+  const started: string[] = [];
+  const completed: string[] = [];
+  let releaseFirst: (() => void) | undefined;
+  const firstCapture = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const manager = new MemoryManager({
+    captureTaskToolResult: async (input) => {
+      started.push(input.toolName);
+      if (input.toolName === "first") await firstCapture;
+      completed.push(input.toolName);
+    },
+    captureProjectSummary: async () => undefined,
+    searchTask: async () => [],
+    searchProject: async () => [],
+  });
+
+  manager.enqueueTaskToolResult({
+    projectId: "project-1",
+    taskId: "task-1",
+    toolName: "first",
+    arguments: {},
+    success: true,
+    output: "one",
+  });
+  manager.enqueueTaskToolResult({
+    projectId: "project-1",
+    taskId: "task-1",
+    toolName: "second",
+    arguments: {},
+    success: true,
+    output: "two",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(started, ["first"]);
+  releaseFirst?.();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(started, ["first", "second"]);
+  assert.deepEqual(completed, ["first", "second"]);
 });
 
 test("ContextManager injects scoped memories and guardrails", async () => {
@@ -160,12 +234,78 @@ test("ContextManager summarizes older history and keeps the latest 15 messages u
     messages,
   });
 
+  test("ContextManager compacts an oversized short history instead of exceeding context limits", async () => {
+    const messages: LLMMessage[] = Array.from({ length: 5 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `message-${index}`,
+    })) as LLMMessage[];
+    const summaryInputs: LLMMessage[][] = [];
+    const provider = createProvider({
+      maxContextTokens: 100,
+      countTokens: async (_messages, callIndex) => callIndex === 0 ? 90 : 30,
+      chat: async (input) => {
+        summaryInputs.push(input);
+        return successResponse({
+          content: "Earlier messages summarized.",
+          tool_calls: [],
+          usage: { input_tokens: 20, output_tokens: 5 },
+          finish_reason: "stop",
+        });
+      },
+    });
+
+    const context = await new ContextManager(provider).build({
+      projectId: "project-1",
+      taskId: "task-1",
+      systemPrompt: "System prompt",
+      messages,
+    });
+
+    assert.equal(context.summarized, true);
+    assert.equal(summaryInputs[0]?.length, 2);
+    assert.deepEqual(context.messages.slice(-3), messages.slice(-3));
+  });
+
   assert.equal(context.summarized, true);
   assert.equal(summaryCalls.length, 1);
   assert.equal(summaryCalls[0]?.length, 3);
   assert.equal(context.messages[0]?.role, "assistant");
   assert.match(context.messages[0]?.content ?? "", /endpoint remains unfinished/);
   assert.deepEqual(context.messages.slice(-15), messages.slice(-15));
+});
+
+test("ContextManager forwards cancellation to its summarization request", async () => {
+  const messages: LLMMessage[] = Array.from({ length: 20 }, (_, index) => ({
+    role: index % 2 === 0 ? "user" : "assistant",
+    content: `message-${index}`,
+  })) as LLMMessage[];
+  const controller = new AbortController();
+  let receivedSignal: AbortSignal | undefined;
+  const provider = createProvider({
+    maxContextTokens: 100,
+    countTokens: async (_messages, callIndex) => callIndex === 0 ? 80 : 40,
+    chat: async () => successResponse({
+      content: "Earlier work summary",
+      tool_calls: [],
+      usage: { input_tokens: 0, output_tokens: 0 },
+      finish_reason: "stop",
+    }),
+  });
+  const originalChat = provider.chat.bind(provider);
+  provider.chat = async (input, tools, systemPrompt, signal) => {
+    receivedSignal = signal;
+    return originalChat(input, tools, systemPrompt, signal);
+  };
+
+  await new ContextManager(provider).build({
+    projectId: "project-1",
+    taskId: "task-1",
+    systemPrompt: "System prompt",
+    messages,
+    signal: controller.signal,
+  });
+
+  assert.equal(receivedSignal, controller.signal);
 });
 
 test("ContextManager expands the recent window to keep a tool call with all results", async () => {
@@ -206,6 +346,62 @@ test("ContextManager expands the recent window to keep a tool call with all resu
   assert.equal(retainedCall !== undefined, true);
   assert.deepEqual(retainedResults.map((message) => message.role === "tool" ? message.tool_call_id : ""), ["call-a", "call-b"]);
   assert.equal(context.messages.length >= 15, true);
+});
+
+test("ContextManager bounds large tool results without mutating persisted history or losing either end", async () => {
+  const originalOutput = `HEAD${"x".repeat(40_000)}TAIL`;
+  const messages: LLMMessage[] = [
+    { role: "user", content: "Inspect the output" },
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "call-output", name: "run_command", arguments: { command: "test" } }],
+    },
+    { role: "tool", tool_call_id: "call-output", content: originalOutput },
+  ];
+  const provider = createProvider({
+    maxContextTokens: 100_000,
+    countTokens: async () => 10,
+  });
+
+  const context = await new ContextManager(provider).build({
+    projectId: "project-1",
+    taskId: "task-1",
+    systemPrompt: "System prompt",
+    messages,
+  });
+
+  const toolMessage = context.messages.find((message) => message.role === "tool");
+  assert.equal(toolMessage?.role, "tool");
+  if (toolMessage?.role === "tool") {
+    assert.equal(toolMessage.content.length <= 16_000, true);
+    assert.match(toolMessage.content, /Tool output truncated for context/);
+    assert.match(toolMessage.content, /^HEAD/);
+    assert.match(toolMessage.content, /TAIL$/);
+  }
+  assert.equal(messages[2]?.role === "tool" ? messages[2].content : "", originalOutput);
+});
+
+test("ContextManager bounds oversized user messages without mutating stored content", async () => {
+  const originalRequest = `HEAD${"x".repeat(40_000)}TAIL`;
+  const messages: LLMMessage[] = [{ role: "user", content: originalRequest }];
+  const provider = createProvider({
+    maxContextTokens: 100_000,
+    countTokens: async () => 10,
+  });
+
+  const context = await new ContextManager(provider).build({
+    projectId: "project-1",
+    taskId: "task-1",
+    systemPrompt: "System prompt",
+    messages,
+  });
+
+  assert.equal(context.messages[0]?.content.length <= 16_000, true);
+  assert.match(context.messages[0]?.content ?? "", /^HEAD/);
+  assert.match(context.messages[0]?.content ?? "", /TAIL$/);
+  assert.match(context.messages[0]?.content ?? "", /Message text truncated for context/);
+  assert.equal(messages[0]?.content, originalRequest);
 });
 
 test("ContextManager drops unresolved tool-call groups before sending history", async () => {

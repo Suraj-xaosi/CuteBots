@@ -56,6 +56,7 @@ export function DashboardWorkspaceClient() {
   const filesQuery = useProjectFilesQuery(
     project?.id ?? null,
     project?.sandbox_status === "RUNNING",
+    project?.setup_status === "READY",
     hasActiveTasks,
   )
   const files = filesQuery.data ?? EMPTY_FILES
@@ -63,6 +64,7 @@ export function DashboardWorkspaceClient() {
   const fileQuery = useFileContentQuery(
     project?.id ?? null,
     selectedFile,
+    project?.setup_status === "READY",
     hasActiveTasks,
   )
   const settingsQuery = useSettingsQuery(showSettings)
@@ -85,6 +87,14 @@ export function DashboardWorkspaceClient() {
   const sandboxMutate = mutations.sandbox.mutate
   const sandboxPending = mutations.sandbox.isPending
   const projectId = project?.id
+  const retrySetup = mutations.setupRetry.mutate
+  const onRetrySetup = useCallback(() => {
+    if (projectId) retrySetup(projectId)
+  }, [projectId, retrySetup])
+  const switchToNodeSandbox = mutations.switchSandbox.mutate
+  const onSwitchToNodeSandbox = useCallback(() => {
+    if (projectId) switchToNodeSandbox(projectId)
+  }, [projectId, switchToNodeSandbox])
   const sandboxRunning = project?.sandbox_status === "RUNNING"
   const onSandboxToggle = useCallback(() => {
     if (!projectId) return
@@ -104,8 +114,12 @@ export function DashboardWorkspaceClient() {
       onOpenSettings: openSettings,
       onSandboxToggle,
       sandboxPending,
+      onRetrySetup,
+      setupRetryPending: mutations.setupRetry.isPending,
+      onSwitchToNodeSandbox,
+      switchSandboxPending: mutations.switchSandbox.isPending,
     }),
-    [projects, project, openProjectForm, openSettings, onSandboxToggle, sandboxPending],
+    [projects, project, openProjectForm, openSettings, onSandboxToggle, sandboxPending, onRetrySetup, mutations.setupRetry.isPending, onSwitchToNodeSandbox, mutations.switchSandbox.isPending],
   )
   const createTask = mutations.createTask.mutate
   const taskAction = mutations.taskAction.mutate

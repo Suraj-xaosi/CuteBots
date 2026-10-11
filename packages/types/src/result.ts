@@ -4,6 +4,7 @@ export enum ErrorCode {
   GIT_CLONE_FAILED = "GIT_CLONE_FAILED",
   GIT_PUSH_FAILED = "GIT_PUSH_FAILED",
   LLM_API_ERROR = "LLM_API_ERROR",
+  LLM_REQUEST_ERROR = "LLM_REQUEST_ERROR",
   LLM_RATE_LIMIT = "LLM_RATE_LIMIT",
   LLM_CONTEXT_OVERFLOW = "LLM_CONTEXT_OVERFLOW",
   TOOL_EXECUTION_FAILED = "TOOL_EXECUTION_FAILED",
@@ -21,4 +22,4 @@ export enum ErrorCode {
 
 export type Result<T> =
   | { ok: true; data: T }
-  | { ok: false; error: string; code: ErrorCode };
+  | { ok: false; error: string; code: ErrorCode; retryAfterMs?: number };

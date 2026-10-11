@@ -51,3 +51,6 @@ packages/db/src/generated/prisma/
 #md
 kutebots.md
 documentation.md
+SANDBOX-ENVIRONMENT-PLAN.md
+AGENT-UPGRADE-PLAN.md
+FRONTEND-WORKSPACE-PLAN.md

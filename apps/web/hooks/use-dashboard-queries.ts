@@ -27,7 +27,14 @@ export const dashboardQueryKeys = {
 }
 
 export function useProjectsQuery() {
-  return useQuery({ queryKey: dashboardQueryKeys.projects, queryFn: fetchProjects })
+  return useQuery({
+    queryKey: dashboardQueryKeys.projects,
+    queryFn: fetchProjects,
+    refetchInterval: (query) =>
+      query.state.data?.some((project) => project.setup_status === "PROVISIONING")
+        ? 1_500
+        : false,
+  })
 }
 
 export function useProjectTasksQuery(projectId: string | null) {
@@ -42,11 +49,16 @@ export function useProjectTasksQuery(projectId: string | null) {
   })
 }
 
-export function useProjectFilesQuery(projectId: string | null, sandboxRunning: boolean, hasActiveTasks: boolean) {
+export function useProjectFilesQuery(
+  projectId: string | null,
+  sandboxRunning: boolean,
+  setupReady: boolean,
+  hasActiveTasks: boolean,
+) {
   return useQuery({
     queryKey: dashboardQueryKeys.projectFiles(projectId),
     queryFn: () => fetchProjectFiles(requireDashboardValue(projectId, "Project")),
-    enabled: Boolean(projectId && sandboxRunning),
+    enabled: Boolean(projectId && sandboxRunning && setupReady),
     refetchInterval: hasActiveTasks ? dashboardRefreshIntervals.activeTaskFiles : false,
   })
 }
@@ -54,6 +66,7 @@ export function useProjectFilesQuery(projectId: string | null, sandboxRunning: b
 export function useFileContentQuery(
   projectId: string | null,
   filePath: string | null,
+  setupReady: boolean,
   hasActiveTasks: boolean,
 ) {
   return useQuery({
@@ -63,7 +76,7 @@ export function useFileContentQuery(
         requireDashboardValue(projectId, "Project"),
         requireDashboardValue(filePath, "File path"),
       ),
-    enabled: Boolean(projectId && filePath),
+    enabled: Boolean(projectId && filePath && setupReady),
     refetchInterval: hasActiveTasks ? dashboardRefreshIntervals.activeTasks : false,
   })
 }

@@ -36,6 +36,10 @@ class ChannelPersistence implements AgentPersistence {
     return { ok: true, data: [] };
   }
 
+  async loadTokenUsage(): Promise<Result<{ inputTokens: number; outputTokens: number }>> {
+    return { ok: true, data: { inputTokens: 0, outputTokens: 0 } };
+  }
+
   async appendMessage(): Promise<Result<void>> {
     return { ok: true, data: undefined };
   }

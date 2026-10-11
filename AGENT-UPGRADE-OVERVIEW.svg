@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1100" viewBox="0 0 1440 1100" role="img" aria-labelledby="title description">
+  <title id="title">CuteBots Agent Upgrade - Hinglish Target Architecture</title>
+  <desc id="description">Planned coding agent ka flow: task aur repo samjho, LLM aur safe tools coordinate karo, changes verify karo, phir repair karo ya evidence ke saath report do.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a1324"/>
+      <stop offset="1" stop-color="#111e32"/>
+    </linearGradient>
+    <linearGradient id="agentFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#183858"/>
+      <stop offset="1" stop-color="#152b45"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#85a9d5"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#55d4aa"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#ff8c80"/>
+    </marker>
+    <style>
+      text { font-family: "Segoe UI", Arial, sans-serif; fill: #edf4ff; }
+      .eyebrow { font-size: 13px; font-weight: 700; letter-spacing: 2px; fill: #76d9bf; }
+      .title { font-size: 38px; font-weight: 700; }
+      .subtitle { font-size: 17px; fill: #afc0d7; }
+      .section { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; fill: #8fb8ec; }
+      .card-title { font-size: 19px; font-weight: 700; }
+      .text { font-size: 15px; fill: #cad7e8; }
+      .muted { font-size: 13px; fill: #a6b9d0; }
+      .flow-label { font-size: 12px; font-weight: 600; fill: #a9c8ed; }
+      .card { fill: #13243a; stroke: #355273; stroke-width: 1.6; }
+      .card-blue { fill: #142a44; stroke: #4a77a5; stroke-width: 1.7; }
+      .card-green { fill: #12352f; stroke: #3a987d; stroke-width: 1.7; }
+      .card-amber { fill: #332a1c; stroke: #a77c3c; stroke-width: 1.7; }
+      .card-red { fill: #352321; stroke: #a95651; stroke-width: 1.7; }
+      .flow { fill: none; stroke: #85a9d5; stroke-width: 2.5; marker-end: url(#arrow); }
+      .flow-green { fill: none; stroke: #55d4aa; stroke-width: 2.5; marker-end: url(#arrowGreen); }
+      .flow-red { fill: none; stroke: #ff8c80; stroke-width: 2.5; marker-end: url(#arrowRed); }
+      .feedback { stroke-dasharray: 7 6; }
+    </style>
+  </defs>
+
+  <rect width="1440" height="1100" fill="url(#background)"/>
+  <circle cx="1350" cy="55" r="190" fill="#224268" opacity=".12"/>
+  <circle cx="75" cy="1000" r="180" fill="#185248" opacity=".10"/>
+
+  <text x="64" y="48" class="eyebrow">CUTEBOTS · AGENT UPGRADE ROADMAP</text>
+  <text x="64" y="99" class="title">Maqsad: reliable coding agent</text>
+  <text x="64" y="130" class="subtitle">Agent repo samjhe, safe changes kare, checks chalaye, aur proof ke saath sachcha result bataye.</text>
+
+  <rect x="64" y="158" width="1312" height="54" rx="14" fill="#102238" stroke="#2c4664"/>
+  <text x="88" y="191" class="section">POORA FLOW</text>
+  <text x="270" y="191" class="text">Kaam do → samjho → plan banao → check karo → proof ke saath report</text>
+  <text x="1122" y="191" class="muted">Bina approval push nahi</text>
+
+  <text x="64" y="251" class="section">1 · REQUEST AUR REPO KO SAMAJHNA</text>
+
+  <rect x="64" y="271" width="270" height="137" rx="16" class="card"/>
+  <circle cx="91" cy="301" r="15" fill="#254b71"/>
+  <text x="86" y="306" class="muted" style="font-weight:700">1</text>
+  <text x="117" y="307" class="card-title">Tumhara kaam</text>
+  <text x="88" y="342" class="text">Request + success ka goal</text>
+  <text x="88" y="367" class="text">Confusion ho toh pehle poochhe</text>
+  <text x="88" y="390" class="muted">Tum guide ya cancel kar sakte ho</text>
+
+  <rect x="389" y="271" width="340" height="137" rx="16" class="card-blue"/>
+  <circle cx="416" cy="301" r="15" fill="#2c5a83"/>
+  <text x="411" y="306" class="muted" style="font-weight:700">2</text>
+  <text x="442" y="307" class="card-title">Repo ki jaankari</text>
+  <text x="413" y="342" class="text">Language, scripts, lockfile, CI</text>
+  <text x="413" y="367" class="text">README + project ke rules</text>
+  <text x="413" y="390" class="muted">Repo badle toh profile refresh kare</text>
+
+  <rect x="784" y="271" width="592" height="137" rx="16" class="card"/>
+  <text x="810" y="307" class="card-title">Context aur memory</text>
+  <text x="810" y="342" class="text">Kaam ki history aur instructions hi rakho; context ko limit mein rakho.</text>
+  <text x="810" y="367" class="text">Zaroori tool results bachao; trusted rules ko repo data se alag rakho.</text>
+  <text x="810" y="390" class="muted">Summary sochne mein madad kare; asli logs proof ke liye bachaye rakho.</text>
+
+  <path d="M334 339 H380" class="flow"/>
+  <path d="M729 339 H775" class="flow"/>
+  <path d="M1080 408 V435" class="flow"/>
+
+  <text x="64" y="456" class="section">2 · AGENT KA SOCHNA AUR KAAM KARNA</text>
+
+  <rect x="389" y="477" width="662" height="214" rx="22" fill="url(#agentFill)" stroke="#6d93bb" stroke-width="2.4"/>
+  <text x="423" y="519" class="card-title" style="font-size:23px">Agent loop · kaam ka coordinator</text>
+  <text x="423" y="557" class="text">Context banao → model se poochho → jawab samjho</text>
+  <text x="423" y="585" class="text">Tools chalao → results jodo → agla step decide karo</text>
+  <text x="423" y="613" class="text">Progress, time/turn limits aur finish gate check karo</text>
+  <rect x="423" y="638" width="594" height="32" rx="10" fill="#223e5d"/>
+  <text x="440" y="659" class="muted">Rokna · limited retries · pause / insaan ko handoff</text>
+
+  <rect x="64" y="500" width="270" height="166" rx="16" class="card-blue"/>
+  <text x="89" y="537" class="card-title">AI provider layer</text>
+  <text x="89" y="570" class="text">Sab providers ka common contract</text>
+  <text x="89" y="597" class="text">LLMClient ek provider chunta hai</text>
+  <text x="89" y="624" class="muted">Anthropic · OpenAI · Groq · Ollama</text>
+  <text x="89" y="648" class="muted">Ek interface; provider badal sakte ho</text>
+
+  <rect x="1106" y="500" width="270" height="166" rx="16" class="card"/>
+  <text x="1131" y="537" class="card-title">Tools ka daftar</text>
+  <text x="1131" y="570" class="text">Search · plan · read · edit</text>
+  <text x="1131" y="597" class="text">Checks · Git · insaan se poochho</text>
+  <text x="1131" y="624" class="muted">Inputs pehle validate karo</text>
+  <text x="1131" y="648" class="muted">Error par agla step bhi batao</text>
+
+  <path d="M389 542 H343" class="flow"/>
+  <path d="M343 615 H380" class="flow"/>
+  <path d="M1051 542 H1097" class="flow"/>
+  <path d="M1097 615 H1060" class="flow"/>
+
+  <rect x="1106" y="706" width="270" height="113" rx="16" class="card-amber"/>
+  <text x="1131" y="743" class="card-title">Alag sandbox</text>
+  <text x="1131" y="775" class="text">Project ke hisaab se runtime</text>
+  <text x="1131" y="800" class="muted">Commands aur file changes control mein</text>
+  <path d="M1241 666 V698" class="flow"/>
+  <path d="M1106 762 H1070 V675 H1059" class="flow"/>
+
+  <rect x="64" y="706" width="270" height="113" rx="16" class="card"/>
+  <text x="89" y="743" class="card-title">Record + proof</text>
+  <text x="89" y="775" class="text">Task status, messages, logs</text>
+  <text x="89" y="800" class="muted">Changes, checks, usage, errors</text>
+  <path d="M420 691 V724 H343" class="flow feedback"/>
+  <text x="350" y="715" class="flow-label">events / proof save karo</text>
+
+  <rect x="389" y="741" width="662" height="131" rx="18" class="card-green"/>
+  <text x="423" y="782" class="card-title">Finish gate · andaza nahi, jaanch</text>
+  <text x="423" y="814" class="text">Repo ke checks chalao: tests · typecheck · lint · build</text>
+  <text x="423" y="842" class="muted">Purane aur naye errors alag; check na ho toh “unverified”, pass nahi.</text>
+  <path d="M1051 621 H1080 V806 H1060" class="flow"/>
+
+  <rect x="389" y="908" width="304" height="100" rx="16" class="card-green"/>
+  <text x="415" y="947" class="card-title">PASS → kaam verify hua</text>
+  <text x="415" y="979" class="text">Kya badla + checks ka asli result</text>
+  <path d="M552 872 V900" class="flow-green"/>
+
+  <rect x="747" y="908" width="304" height="100" rx="16" class="card-red"/>
+  <text x="773" y="947" class="card-title">FAIL → limited repair</text>
+  <text x="773" y="979" class="text">Error samjho → agent se fix karao</text>
+  <path d="M693 958 H739" class="flow-red"/>
+  <path d="M899 908 V704 H1051" class="flow-red feedback"/>
+
+  <rect x="1106" y="872" width="270" height="136" rx="16" class="card"/>
+  <text x="1131" y="910" class="card-title">Tumhara control</text>
+  <text x="1131" y="942" class="text">Samjhao · guide · approve · roko</text>
+  <text x="1131" y="969" class="text">Atke? safe adhura kaam handoff</text>
+  <text x="1131" y="993" class="muted">Push / PR tumhari approval se hi</text>
+  <path d="M1051 658 H1080 V923 H1097" class="flow feedback"/>
+
+  <rect x="64" y="1031" width="1312" height="48" rx="13" fill="#102238" stroke="#355273"/>
+  <text x="88" y="1061" class="section">HAR WAQT</text>
+  <text x="225" y="1061" class="muted">Safety + permissions</text>
+  <text x="407" y="1061" class="muted">Rokna / timeout / budget</text>
+  <text x="645" y="1061" class="muted">Sachcha status + proof ka record</text>
+  <text x="952" y="1061" class="muted">Evals + CI se sudhaar naapna</text>
+
+  <text x="64" y="1094" class="muted">Roadmap phases 0–6 · Yeh future ka target hai, aaj ki saari features ka claim nahi. Sandbox setup ka alag plan hai.</text>
+</svg>

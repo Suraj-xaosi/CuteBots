@@ -13,6 +13,10 @@ export interface DashboardWorkspaceState {
   onOpenSettings: () => void
   onSandboxToggle: () => void
   sandboxPending: boolean
+  onRetrySetup: () => void
+  setupRetryPending: boolean
+  onSwitchToNodeSandbox: () => void
+  switchSandboxPending: boolean
 }
 
 export interface DashboardNoticeState {

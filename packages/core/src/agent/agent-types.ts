@@ -19,13 +19,14 @@ export interface StoredAgentMessage {
 export interface AgentLogEvent {
   id: number;
   taskId: string;
-  type: "thinking" | "tool_call" | "tool_result" | "warn" | "error" | "status" | "message";
+  type: "thinking" | "tool_call" | "tool_result" | "tool_failure" | "plan" | "evidence" | "warn" | "error" | "status" | "message";
   content: string;
   createdAt: Date;
 }
 
 export interface AgentPersistence {
   loadMessages(taskId: string): Promise<Result<StoredAgentMessage[]>>;
+  loadTokenUsage(taskId: string): Promise<Result<{ inputTokens: number; outputTokens: number }>>;
   appendMessage(message: StoredAgentMessage): Promise<Result<void>>;
   updateTaskStatus(taskId: string, status: TaskStatus, failReason?: string): Promise<Result<void>>;
   appendLog(input: Omit<AgentLogEvent, "id" | "createdAt">): Promise<Result<AgentLogEvent>>;

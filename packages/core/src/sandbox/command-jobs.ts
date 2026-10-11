@@ -36,8 +36,8 @@ export class SandboxCommandJobs {
 
     const jobId = randomUUID();
     const started = await runDocker([
-      "exec", "-d", containerId, "node", "-e", COMMAND_JOB_START_SCRIPT,
-      jobId, command, String(COMMAND_OUTPUT_LIMIT_BYTES),
+      "exec", "-d", containerId, "sh", "-c", COMMAND_JOB_START_SCRIPT,
+      "sandbox-job-start", jobId, command, String(COMMAND_OUTPUT_LIMIT_BYTES), "1800",
     ]);
     if (started.exitCode !== 0 || started.spawnError) {
       return this.failure(commandError(started), ErrorCode.CONTAINER_EXEC_FAILED);
@@ -81,14 +81,22 @@ export class SandboxCommandJobs {
     }
 
     const result = await runDocker([
-      "exec", containerId, "node", "-e", COMMAND_JOB_POLL_SCRIPT,
-      jobId, String(offset), String(COMMAND_POLL_CHUNK_BYTES), String(COMMAND_JOB_MAX_AGE_MS),
+      "exec", containerId, "sh", "-c", COMMAND_JOB_POLL_SCRIPT,
+      "sandbox-job-poll", jobId, String(offset), String(COMMAND_POLL_CHUNK_BYTES), String(COMMAND_JOB_MAX_AGE_MS),
     ]);
     if (result.exitCode !== 0 || result.spawnError) {
       return this.failure(commandError(result), ErrorCode.CONTAINER_EXEC_FAILED);
     }
     try {
-      return { ok: true, data: JSON.parse(result.stdout) as CommandJobSnapshot };
+      const parsed: unknown = JSON.parse(result.stdout);
+      if (!isCommandJobSnapshot(parsed)) {
+        return this.failure("Sandbox returned an invalid command job status", ErrorCode.CONTAINER_EXEC_FAILED);
+      }
+      const { outputBase64, ...snapshot } = parsed;
+      return {
+        ok: true,
+        data: { ...snapshot, output: Buffer.from(outputBase64, "base64").toString("utf8") },
+      };
     } catch {
       return this.failure("Sandbox returned invalid command job status", ErrorCode.CONTAINER_EXEC_FAILED);
     }
@@ -104,7 +112,7 @@ export class SandboxCommandJobs {
     }
 
     const result = await runDocker([
-      "exec", containerId, "node", "-e", COMMAND_JOB_CANCEL_SCRIPT, jobId,
+      "exec", containerId, "sh", "-c", COMMAND_JOB_CANCEL_SCRIPT, "sandbox-job-cancel", jobId,
     ]);
     if (result.exitCode !== 0) return this.failure(commandError(result), ErrorCode.CONTAINER_EXEC_FAILED);
     return { ok: true, data: undefined };
@@ -136,6 +144,25 @@ export class SandboxCommandJobs {
   private failure<T>(error: string, code: ErrorCode): Result<T> {
     return { ok: false, error: error || "Docker command failed", code };
   }
+}
+
+interface EncodedCommandJobSnapshot extends Omit<CommandJobSnapshot, "output"> {
+  outputBase64: string;
+}
+
+function isCommandJobSnapshot(value: unknown): value is EncodedCommandJobSnapshot {
+  if (typeof value !== "object" || value === null) return false;
+  const snapshot = value as Record<string, unknown>;
+  return typeof snapshot.jobId === "string" &&
+    (snapshot.status === "running" ||
+      snapshot.status === "completed" ||
+      snapshot.status === "failed" ||
+      snapshot.status === "cancelled" ||
+      snapshot.status === "timed_out") &&
+    typeof snapshot.outputBase64 === "string" &&
+    Number.isSafeInteger(snapshot.nextOffset) &&
+    (snapshot.exitCode === null || Number.isSafeInteger(snapshot.exitCode)) &&
+    typeof snapshot.outputTruncated === "boolean";
 }
 
 function isValidJobId(jobId: string): boolean {

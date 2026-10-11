@@ -53,6 +53,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     messages: LLMMessage[],
     tools: ToolDefinition[],
     systemPrompt: string,
+    signal?: AbortSignal
   ): Promise<Result<LLMResponse>> {
     try {
       const response = await this.client.chat.completions.create({
@@ -60,7 +61,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         messages: toOpenAIMessages(messages, systemPrompt),
         tools: tools.length ? toOpenAITools(tools) : undefined,
         tool_choice: tools.length ? "auto" : undefined,
-      });
+      }, { signal });
       const choice = response.choices[0];
       if (!choice) {
         return { ok: false, error: "LLM provider returned no choices", code: ErrorCode.LLM_API_ERROR };

@@ -50,6 +50,12 @@ export class TaskService {
     if (project.sandbox_status !== SandboxStatus.RUNNING) {
       throw new ApiError(503, ErrorCode.CONTAINER_NOT_FOUND, "Project sandbox is stopped");
     }
+    if (project.setup_status !== "READY") {
+      const setupMessage = project.setup_error
+        ? `Project setup failed: ${project.setup_error}`
+        : "Project setup is still running; wait until setup is ready before starting a task.";
+      throw new ApiError(409, ErrorCode.TOOL_EXECUTION_FAILED, setupMessage);
+    }
 
     const task = await this.prisma.task.create({
       data: { project_id: projectId, description: description.trim(), status: TaskStatus.PENDING },
@@ -91,6 +97,9 @@ export class TaskService {
     const project = await this.requireProject(task.project_id);
     if (project.status !== ProjectStatus.ACTIVE || project.sandbox_status !== SandboxStatus.RUNNING) {
       throw new ApiError(503, ErrorCode.CONTAINER_NOT_FOUND, "Project and sandbox must be running to resume");
+    }
+    if (project.setup_status !== "READY") {
+      throw new ApiError(409, ErrorCode.TOOL_EXECUTION_FAILED, "Project setup must be ready before resuming a task");
     }
     const enqueued = this.loops.enqueue({
       id: task.id,
@@ -171,6 +180,7 @@ function toTaskStatus(status: string): TaskStatus {
     case "RUNNING": return TaskStatus.RUNNING;
     case "PAUSED": return TaskStatus.PAUSED;
     case "DONE": return TaskStatus.DONE;
+    case "UNVERIFIED": return TaskStatus.UNVERIFIED;
     case "FAILED": return TaskStatus.FAILED;
     case "CANCELLED": return TaskStatus.CANCELLED;
     default: throw new Error(`Unknown task status: ${status}`);

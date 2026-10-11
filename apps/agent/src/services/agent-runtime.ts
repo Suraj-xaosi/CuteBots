@@ -13,6 +13,9 @@ import {
   ToolRegistry,
   UIChannel,
   type AgentExecutor,
+  type AgentChannel,
+  type AgentLoopOptions,
+  type AgentPlan,
   type AgentTask,
 } from "@workspace/core";
 import { ErrorCode, TaskStatus, type ProviderName, type Result } from "@workspace/types";
@@ -44,10 +47,16 @@ export class AgentRuntimeFactory {
   private async createLoop(task: AgentTask): Promise<AgentLoop> {
     const project = await this.dependencies.prisma.project.findUnique({ where: { id: task.projectId } });
     if (!project) throw new Error("Project not found");
+    if (project.setup_status !== "READY") {
+      throw new Error("Project environment setup has not completed; the task cannot start safely");
+    }
 
     let sandbox = this.dependencies.containers.get(project.id);
     if (!sandbox.ok) {
-      const recovered = await this.dependencies.containers.recover(project.id);
+      const recovered = await this.dependencies.containers.recover(
+        project.id,
+        project.sandbox_type === "minimal" ? "minimal" : "node",
+      );
       if (!recovered.ok) throw new Error(recovered.error);
       sandbox = this.dependencies.containers.get(project.id);
     }
@@ -63,11 +72,13 @@ export class AgentRuntimeFactory {
     const readOnlyCloneCredential = project.clone_credential
       ? new SecretVault().decrypt(project.clone_credential)
       : undefined;
+    const baseBranch = process.env.GITHUB_BASE_BRANCH?.trim() || undefined;
     const gitTool = new GitTool({
       repositoryUrl: project.repo_url,
       taskId: task.id,
       githubToken,
       readOnlyCloneCredential,
+      baseBranch,
     });
 
     if (!task.resume) {
@@ -84,17 +95,30 @@ export class AgentRuntimeFactory {
     const tavilyKey = unwrap(await this.dependencies.settings.getResolved("TAVILY_KEY"));
     const uiChannel = new UIChannel(task.id, this.dependencies.persistence, this.dependencies.sseBroker, this.dependencies.replies);
     const channel = new TaskChannel(uiChannel, new TelegramChannel(task.id, this.dependencies.telegram));
+    let currentPlan: AgentPlan | undefined;
     const registry = new ToolRegistry({
       taskId: task.id,
       repositoryUrl: project.repo_url,
       githubToken,
       readOnlyCloneCredential,
+      baseBranch,
       tavilyKey,
       humanInteraction: channel,
+      publishPlan: async (plan: AgentPlan) => {
+        currentPlan = plan;
+        const logged = await this.dependencies.persistence.appendLog({
+          taskId: task.id,
+          type: "plan",
+          content: JSON.stringify(plan),
+        });
+        if (!logged.ok) throw new Error(`Unable to persist plan update: ${logged.error}`);
+        await channel.sendLog(logged.data);
+      },
     });
 
-    const memory = await this.createMemoryManager(providerName, apiKey, model);
+    const memory = await this.createMemoryManager(providerName, apiKey, model, task.id, channel);
     const context = new ContextManager(provider, memory);
+    const budget = this.readAgentBudget();
     return new AgentLoop(
       this.dependencies.persistence,
       provider,
@@ -102,14 +126,51 @@ export class AgentRuntimeFactory {
       registry,
       sandbox.data,
       memory,
-      { channel },
+      {
+        channel,
+        ...budget,
+        currentPlan: () => currentPlan,
+        modelLabel: model ?? defaultModel(providerName),
+      },
     );
+  }
+
+  private readAgentBudget(): Pick<
+    AgentLoopOptions,
+    "maxTotalTokens" | "maxCostUsd" | "inputCostPerMillionUsd" | "outputCostPerMillionUsd"
+  > {
+    const tokenBudget = readOptionalNumber("AGENT_MAX_TOTAL_TOKENS");
+    if (tokenBudget !== undefined && (!Number.isSafeInteger(tokenBudget) || tokenBudget <= 0)) {
+      throw new Error("AGENT_MAX_TOTAL_TOKENS must be a positive safe integer");
+    }
+    const maxCostUsd = readOptionalNumber("AGENT_MAX_COST_USD");
+    const inputCostPerMillionUsd = readOptionalNumber("AGENT_INPUT_COST_PER_MILLION_USD");
+    const outputCostPerMillionUsd = readOptionalNumber("AGENT_OUTPUT_COST_PER_MILLION_USD");
+    if (maxCostUsd !== undefined && maxCostUsd <= 0) {
+      throw new Error("AGENT_MAX_COST_USD must be positive");
+    }
+    if ((inputCostPerMillionUsd !== undefined && inputCostPerMillionUsd < 0) ||
+      (outputCostPerMillionUsd !== undefined && outputCostPerMillionUsd < 0)) {
+      throw new Error("Agent token cost rates must be non-negative");
+    }
+    if (maxCostUsd !== undefined &&
+      (inputCostPerMillionUsd === undefined || outputCostPerMillionUsd === undefined)) {
+      throw new Error("AGENT_MAX_COST_USD requires both input and output token cost rates");
+    }
+    return {
+      ...(tokenBudget !== undefined ? { maxTotalTokens: tokenBudget } : {}),
+      ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
+      ...(inputCostPerMillionUsd !== undefined ? { inputCostPerMillionUsd } : {}),
+      ...(outputCostPerMillionUsd !== undefined ? { outputCostPerMillionUsd } : {}),
+    };
   }
 
   private async createMemoryManager(
     providerName: ProviderName,
     apiKey: string | undefined,
     model: string | undefined,
+    taskId: string,
+    channel: AgentChannel,
   ): Promise<MemoryManager | undefined> {
     const llmProvider = unwrap(await this.dependencies.settings.getResolved("MEMORY_LLM_PROVIDER")) ?? providerName;
     const llmKey = unwrap(await this.dependencies.settings.getResolved("MEMORY_LLM_API_KEY")) ?? apiKey;
@@ -122,14 +183,33 @@ export class AgentRuntimeFactory {
     if (llmProvider !== "ollama" && !llmKey) return undefined;
     if (embedderProvider !== "ollama" && !embedderKey) return undefined;
 
-    return new MemoryManager(new Mem0MemoryStore({
-      qdrantHost: process.env.QDRANT_HOST ?? "localhost",
-      qdrantPort: Number(process.env.QDRANT_PORT ?? 6333),
-      historyDbPath: process.env.MEM0_HISTORY_DB_PATH,
-      llm: { provider: llmProvider, apiKey: llmKey, model: llmModel },
-      embedder: { provider: embedderProvider, apiKey: embedderKey, model: embedderModel },
-    }));
+    return new MemoryManager(
+      new Mem0MemoryStore({
+        qdrantHost: process.env.QDRANT_HOST ?? "localhost",
+        qdrantPort: Number(process.env.QDRANT_PORT ?? 6333),
+        historyDbPath: process.env.MEM0_HISTORY_DB_PATH,
+        llm: { provider: llmProvider, apiKey: llmKey, model: llmModel },
+        embedder: { provider: embedderProvider, apiKey: embedderKey, model: embedderModel },
+      }),
+      async (operation) => {
+        const logged = await this.dependencies.persistence.appendLog({
+          taskId,
+          type: "warn",
+          content: `Memory operation ${operation} failed; the agent continued without it.`,
+        });
+        if (!logged.ok) throw new Error(logged.error);
+        await channel.sendLog(logged.data);
+      },
+    );
   }
+}
+
+function readOptionalNumber(name: string): number | undefined {
+  const value = process.env[name];
+  if (value === undefined || value.trim() === "") return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`${name} must be a finite number`);
+  return parsed;
 }
 
 class LazyAgentExecutor implements AgentExecutor {

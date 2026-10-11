@@ -1,6 +1,6 @@
 import { ErrorCode, type Result } from "@workspace/types";
 import { commandError, runDocker } from "./docker.js";
-import { Sandbox } from "./sandbox.js";
+import { Sandbox, type SandboxProfile } from "./sandbox.js";
 
 export class ContainerManager {
   private static instance: ContainerManager | undefined;
@@ -13,14 +13,14 @@ export class ContainerManager {
     return this.instance;
   }
 
-  async create(projectId: string): Promise<Result<Sandbox>> {
+  async create(projectId: string, profile: SandboxProfile = "node"): Promise<Result<Sandbox>> {
     const existing = this.sandboxes.get(projectId);
     if (existing) return { ok: true, data: existing };
 
     const network = await this.ensureSandboxNetwork();
     if (!network.ok) return network;
 
-    const sandbox = new Sandbox(projectId);
+    const sandbox = new Sandbox(projectId, profile);
     const result = await sandbox.create();
     if (!result.ok) return result;
 
@@ -47,8 +47,8 @@ export class ContainerManager {
     return result;
   }
 
-  async recover(projectId: string): Promise<Result<void>> {
-    const sandbox = new Sandbox(projectId);
+  async recover(projectId: string, profile: SandboxProfile = "node"): Promise<Result<void>> {
+    const sandbox = new Sandbox(projectId, profile);
     const result = await sandbox.recover();
     if (result.ok) this.sandboxes.set(projectId, sandbox);
     return result;

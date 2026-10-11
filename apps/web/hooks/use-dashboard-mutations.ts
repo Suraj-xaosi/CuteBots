@@ -8,8 +8,10 @@ import {
   createTask,
   destroySandbox,
   replyToTask,
+  retryProjectSetup,
   resumeTask,
   startSandbox,
+  switchProjectToNodeSandbox,
   updateSettings,
   type CreateProjectInput,
   type ProjectSummary,
@@ -67,6 +69,28 @@ export function useDashboardMutations({
     onError: handleMutationError,
   })
 
+  const setupRetryMutation = useMutation({
+    mutationFn: retryProjectSetup,
+    onSuccess: async (updated) => {
+      onNotice("Project setup retry started.")
+      await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projects })
+      await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projectFiles(updated.id) })
+    },
+    onError: handleMutationError,
+  })
+
+  const switchSandboxMutation = useMutation({
+    mutationFn: switchProjectToNodeSandbox,
+    onSuccess: async (updated) => {
+      onNotice("Created a fresh Node.js sandbox. Preparing the repository again.")
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projects }),
+        queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projectFiles(updated.id) }),
+      ])
+    },
+    onError: handleMutationError,
+  })
+
   const taskActionMutation = useMutation({
     mutationFn: ({
       taskId,
@@ -104,6 +128,8 @@ export function useDashboardMutations({
     createProject: createProjectMutation,
     createTask: createTaskMutation,
     sandbox: sandboxMutation,
+    setupRetry: setupRetryMutation,
+    switchSandbox: switchSandboxMutation,
     taskAction: taskActionMutation,
     reply: replyMutation,
     saveSettings: settingsMutation,

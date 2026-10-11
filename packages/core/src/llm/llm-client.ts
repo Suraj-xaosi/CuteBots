@@ -48,8 +48,9 @@ export class LLMClient implements LLMProvider {
     messages: LLMMessage[],
     tools: ToolDefinition[],
     systemPrompt: string,
+    signal?: AbortSignal
   ): Promise<Result<LLMResponse>> {
-    return this.provider.chat(messages, tools, systemPrompt);
+    return this.provider.chat(messages, tools, systemPrompt, signal);
   }
 
   countTokens(messages: LLMMessage[]): Promise<number> {

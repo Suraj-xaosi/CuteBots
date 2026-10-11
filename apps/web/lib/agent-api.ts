@@ -1,8 +1,10 @@
 const AGENT_BASE_PATH = "/api"
 
 export type ProjectStatus = "ACTIVE" | "STOPPED"
-export type TaskStatus = "PENDING" | "RUNNING" | "PAUSED" | "DONE" | "FAILED" | "CANCELLED"
+export type TaskStatus = "PENDING" | "RUNNING" | "PAUSED" | "DONE" | "UNVERIFIED" | "FAILED" | "CANCELLED"
 export type SandboxStatus = "RUNNING" | "STOPPED"
+export type SandboxProfile = "node" | "minimal"
+export type ProjectSetupStatus = "PENDING" | "PROVISIONING" | "READY" | "FAILED"
 
 export interface ProjectSummary {
   id: string
@@ -13,6 +15,11 @@ export interface ProjectSummary {
   sandbox_status: SandboxStatus
   sandbox_type: string
   workspace_ready: boolean
+  setup_status: ProjectSetupStatus
+  setup_log: string
+  setup_error: string | null
+  setup_attempts: number
+  detected_setup: string | null
   created_at: string
 }
 
@@ -50,6 +57,7 @@ export interface PublicSettings {
 export interface CreateProjectInput {
   name: string
   repo_url: string
+  sandbox_type: SandboxProfile
   github_token?: string
   clone_credential?: string
 }
@@ -103,6 +111,20 @@ export async function fetchProjectTasks(projectId: string): Promise<TaskSummary[
 
 export async function startSandbox(projectId: string): Promise<ProjectSummary> {
   const response = await apiRequest<{ project: ProjectSummary }>(`/api/projects/${projectId}/sandbox/start`, {
+    method: "POST",
+  })
+  return response.project
+}
+
+export async function retryProjectSetup(projectId: string): Promise<ProjectSummary> {
+  const response = await apiRequest<{ project: ProjectSummary }>(`/api/projects/${projectId}/setup/retry`, {
+    method: "POST",
+  })
+  return response.project
+}
+
+export async function switchProjectToNodeSandbox(projectId: string): Promise<ProjectSummary> {
+  const response = await apiRequest<{ project: ProjectSummary }>(`/api/projects/${projectId}/setup/switch-to-node`, {
     method: "POST",
   })
   return response.project

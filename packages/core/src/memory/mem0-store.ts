@@ -5,6 +5,7 @@ import type {
   ProjectMemoryInput,
   ToolMemoryInput,
 } from "./memory-store.js";
+import { redactStructuredSecrets } from "../security/secret-redaction.js";
 
 type Mem0Client = Pick<Memory, "add" | "search">;
 
@@ -144,16 +145,6 @@ function truncate(value: string, maxLength: number): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength)}...`;
 }
 
-function redactStructuredSecrets(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactStructuredSecrets);
-  if (typeof value === "string") return redactTextSecrets(value);
-  if (typeof value !== "object" || value === null) return value;
-
-  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
-    key,
-    /api[_-]?key|token|password|secret/i.test(key) ? "***" : redactStructuredSecrets(entry),
-  ]));
-}
 
 function redactTextSecrets(value: string): string {
   return value

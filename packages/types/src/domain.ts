@@ -8,6 +8,7 @@ export enum TaskStatus {
   RUNNING = "RUNNING",
   PAUSED = "PAUSED",
   DONE = "DONE",
+  UNVERIFIED = "UNVERIFIED",
   FAILED = "FAILED",
   CANCELLED = "CANCELLED",
 }

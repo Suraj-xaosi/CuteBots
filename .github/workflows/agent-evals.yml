@@ -1,0 +1,46 @@
+name: Agent deterministic evals
+
+on:
+  pull_request:
+    paths:
+      - "packages/core/**"
+      - "packages/types/**"
+      - "packages/db/**"
+      - "apps/agent/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/agent-evals.yml"
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Run the short CI subset or the full deterministic fixture suite"
+        required: true
+        default: "full"
+        type: choice
+        options:
+          - ci
+          - full
+
+jobs:
+  agent-evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run deterministic agent evals
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.suite }}" = "full" ]; then
+            npm run eval --workspace=@workspace/core -- --output=agent-eval-report.json
+          else
+            npm run eval:ci --workspace=@workspace/core -- --output=agent-eval-report.json
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-eval-report
+          path: agent-eval-report.json
+          if-no-files-found: ignore

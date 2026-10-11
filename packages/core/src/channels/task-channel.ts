@@ -17,8 +17,9 @@ export class TaskChannel implements AgentChannel, HumanInteraction {
 
   async sendLog(event: AgentLogEvent): Promise<void> {
     await this.ui.sendLog(event);
-    if (this.telegram.isReady && ["status", "warn", "error"].includes(event.type)) {
-      await this.telegram.sendLog(event);
+    if (this.telegram.isReady && ["status", "warn", "error", "plan"].includes(event.type)) {
+      const content = event.type === "plan" ? this.renderPlanEvent(event.content) : event.content;
+      await this.telegram.sendLog({ ...event, content });
     }
   }
 
@@ -50,6 +51,27 @@ export class TaskChannel implements AgentChannel, HumanInteraction {
     } finally {
       this.telegram.endWaitingForReply();
       signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  private renderPlanEvent(content: string): string {
+    try {
+      const value: unknown = JSON.parse(content);
+      if (typeof value !== "object" || value === null || !("title" in value) || !("steps" in value)) return content;
+      const plan = value as { title: unknown; steps: unknown };
+      if (typeof plan.title !== "string" || !Array.isArray(plan.steps)) return content;
+      return [
+        `Plan: ${plan.title}`,
+        ...plan.steps.map((step, index) => {
+          if (typeof step !== "object" || step === null || !("description" in step) || !("status" in step)) {
+            return `${index + 1}. [unknown]`;
+          }
+          const item = step as { description: unknown; status: unknown };
+          return `${index + 1}. [${String(item.status)}] ${String(item.description)}`;
+        }),
+      ].join("\n");
+    } catch {
+      return content;
     }
   }
 }

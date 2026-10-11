@@ -6,13 +6,18 @@ import { COMMAND_FOREGROUND_TIMEOUT_MS, WORKSPACE_ROOT } from "./sandbox/constan
 
 export type { CommandJobSnapshot } from "./sandbox/command-jobs.js";
 
+export type SandboxProfile = "node" | "minimal";
+
 export class Sandbox {
   private containerId: string | null = null;
   private readonly containerName: string;
   private readonly commandJobs: SandboxCommandJobs;
   private readonly fileOperations: SandboxFileOperations;
 
-  constructor(private readonly projectId: string) {
+  constructor(
+    private readonly projectId: string,
+    private readonly profile: SandboxProfile = "node",
+  ) {
     const safeProjectId = projectId.replace(/[^a-zA-Z0-9_.-]/g, "-");
     this.containerName = `sandbox-${safeProjectId}`;
     this.commandJobs = new SandboxCommandJobs(() => this.containerId);
@@ -37,7 +42,7 @@ export class Sandbox {
       "0.5",
       "--workdir",
       WORKSPACE_ROOT,
-      process.env.SANDBOX_IMAGE ?? "cutebots-sandbox-node:latest",
+      this.imageName(),
     ]);
 
     if (result.exitCode === 0) {
@@ -154,5 +159,14 @@ export class Sandbox {
 
   private failure<T>(error: string, code: ErrorCode): Result<T> {
     return { ok: false, error: error || "Docker command failed", code };
+  }
+
+  private imageName(): string {
+    if (this.profile === "node") {
+      return process.env.SANDBOX_NODE_IMAGE ??
+        process.env.SANDBOX_IMAGE ??
+        "cutebots-sandbox-node:latest";
+    }
+    return process.env.SANDBOX_MINIMAL_IMAGE ?? "cutebots-sandbox-minimal:latest";
   }
 }
