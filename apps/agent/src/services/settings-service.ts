@@ -6,31 +6,16 @@ const settingNames = [
   "LLM_PROVIDER",
   "LLM_MODEL",
   "LLM_API_KEY",
-  "TAVILY_KEY",
-  "TELEGRAM_BOT_TOKEN",
-  "TELEGRAM_CHAT_ID",
-  "MEMORY_LLM_PROVIDER",
-  "MEMORY_LLM_MODEL",
-  "MEMORY_LLM_API_KEY",
-  "MEMORY_EMBEDDER_PROVIDER",
-  "MEMORY_EMBEDDER_MODEL",
-  "MEMORY_EMBEDDER_API_KEY",
 ] as const;
 
 export type SettingName = typeof settingNames[number];
 
 const secretNames = new Set<SettingName>([
   "LLM_API_KEY",
-  "TAVILY_KEY",
-  "TELEGRAM_BOT_TOKEN",
-  "TELEGRAM_CHAT_ID",
-  "MEMORY_LLM_API_KEY",
-  "MEMORY_EMBEDDER_API_KEY",
 ]);
 
 const settingsInputSchema = z.record(z.string(), z.string().max(4_000));
 const llmProviderSchema = z.enum(["anthropic", "openai", "groq", "ollama"]);
-const memoryProviderSchema = z.enum(["openai", "anthropic", "groq", "ollama"]);
 const settingNameSet = new Set<string>(settingNames);
 
 export interface PublicSettings {
@@ -69,9 +54,7 @@ export class SettingsService {
       for (const name of settingNames) {
         const setting = storedByName.get(name);
         const isSecret = secretNames.has(name);
-        const configured = (name === "TELEGRAM_BOT_TOKEN" || name === "TELEGRAM_CHAT_ID") && setting
-          ? Boolean(this.createVault().decrypt(setting.value))
-          : Boolean(setting?.value || environmentValue(name));
+        const configured = Boolean(setting?.value || environmentValue(name));
         if (isSecret) {
           configuredSecrets[name] = configured;
           continue;
@@ -141,10 +124,6 @@ function validateSetting(name: string, value: string): Result<void> {
   if (name === "LLM_PROVIDER") {
     const parsed = llmProviderSchema.safeParse(value);
     if (!parsed.success) return { ok: false, error: "Unsupported LLM provider", code: ErrorCode.TOOL_EXECUTION_FAILED };
-  }
-  if (name === "MEMORY_LLM_PROVIDER" || name === "MEMORY_EMBEDDER_PROVIDER") {
-    const parsed = memoryProviderSchema.safeParse(value);
-    if (!parsed.success) return { ok: false, error: "Unsupported memory provider", code: ErrorCode.TOOL_EXECUTION_FAILED };
   }
   if (name.endsWith("_MODEL") && !/^[A-Za-z0-9._:/-]{1,200}$/.test(value)) {
     return { ok: false, error: `Invalid model name for ${name}`, code: ErrorCode.TOOL_EXECUTION_FAILED };

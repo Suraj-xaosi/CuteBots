@@ -16,14 +16,6 @@ export function countMessageTokens(messages: LLMMessage[]): number {
   return tokenizer.encode(text).length;
 }
 
-export function parseToolArguments(json: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(json);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("LLM returned tool arguments that were not a JSON object");
-  }
-  return parsed as Record<string, unknown>;
-}
-
 export function mapProviderError(error: unknown, apiKey?: string): Result<never> {
   const status = readStatus(error);
   const rawMessage = error instanceof Error ? error.message : "LLM provider request failed";
@@ -71,18 +63,4 @@ function readRetryAfterMs(error: unknown): number | undefined {
   if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1_000);
   const date = Date.parse(value);
   return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
-}
-
-export function mapOpenAIFinishReason(reason: string | null): "stop" | "tool_use" | "length" | "error" {
-  if (reason === "tool_calls" || reason === "function_call") return "tool_use";
-  if (reason === "length") return "length";
-  if (reason === "stop") return "stop";
-  return "error";
-}
-
-export function mapAnthropicStopReason(reason: string | null): "stop" | "tool_use" | "length" | "error" {
-  if (reason === "tool_use") return "tool_use";
-  if (reason === "max_tokens") return "length";
-  if (reason === "end_turn" || reason === "stop_sequence") return "stop";
-  return "error";
 }

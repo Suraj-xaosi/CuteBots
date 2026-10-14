@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { Maximize2, Minimize2, PanelTopClose, PanelTopOpen } from "lucide-react"
+import { PanelTopClose, PanelTopOpen } from "lucide-react"
 
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent, CardHeader } from "@workspace/ui/components/card"
@@ -49,18 +49,14 @@ export function DashboardPanel({
   children,
   className,
   collapsed = false,
-  focused = false,
   onToggleCollapse,
-  onToggleFocus,
 }: {
   title: string
   action?: ReactNode
   children: ReactNode
   className?: string
   collapsed?: boolean
-  focused?: boolean
   onToggleCollapse?: () => void
-  onToggleFocus?: () => void
 }) {
   return (
     <section role="region" aria-label={title} className={cn("flex min-h-0 flex-col", className)}>
@@ -81,18 +77,6 @@ export function DashboardPanel({
                 className="grid size-8 shrink-0 place-items-center rounded text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-zinc-800"
               >
                 {collapsed ? <PanelTopOpen className="size-3.5" /> : <PanelTopClose className="size-3.5" />}
-              </button>
-            )}
-            {onToggleFocus && (
-              <button
-                type="button"
-                aria-label={`${focused ? "Restore" : "Focus"} ${title} panel`}
-                aria-pressed={focused}
-                title={`${focused ? "Restore layout" : "Focus"} ${title}`}
-                onClick={onToggleFocus}
-                className="grid size-8 shrink-0 place-items-center rounded text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-zinc-800"
-              >
-                {focused ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
               </button>
             )}
           </div>

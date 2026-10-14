@@ -8,8 +8,6 @@ import {
   Field,
   FieldGroup,
   FieldLabel,
-  FieldLegend,
-  FieldSet,
 } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
 import {
@@ -87,7 +85,6 @@ function LoadedSettingsDialog({
   const [provider, setProvider] = useState(settings.values.LLM_PROVIDER ?? "openai")
   const [model, setModel] = useState(settings.values.LLM_MODEL ?? "gpt-4.1-mini")
   const [apiKey, setApiKey] = useState("")
-  const [telegramToken, setTelegramToken] = useState("")
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -96,7 +93,6 @@ function LoadedSettingsDialog({
         LLM_PROVIDER: provider,
         LLM_MODEL: model,
         ...(apiKey.trim() ? { LLM_API_KEY: apiKey.trim() } : {}),
-        ...(telegramToken.trim() ? { TELEGRAM_BOT_TOKEN: telegramToken.trim() } : {}),
       },
       clearSecretFields,
     )
@@ -104,7 +100,6 @@ function LoadedSettingsDialog({
 
   function clearSecretFields() {
     setApiKey("")
-    setTelegramToken("")
   }
 
   return (
@@ -159,49 +154,6 @@ function LoadedSettingsDialog({
               />
             </Field>
           )}
-          <FieldSet className="border-t border-zinc-200 pt-3">
-            <FieldLegend variant="label">Telegram</FieldLegend>
-            <p className="mt-1 text-xs text-zinc-600">
-              Create a bot with{" "}
-              <a className="underline" href="https://t.me/BotFather" target="_blank" rel="noreferrer">
-                @BotFather
-              </a>
-              , paste its token, save, then send /start to your bot in Telegram. It will send task status, results, and
-              agent questions; reply to an agent question in Telegram to continue.
-            </p>
-            <Field className="mt-3">
-              <FieldLabel htmlFor="telegram-token" className="text-xs">
-                Bot token{" "}
-                <span className="font-normal text-zinc-500">
-                  {settings.configuredSecrets.TELEGRAM_BOT_TOKEN
-                    ? settings.configuredSecrets.TELEGRAM_CHAT_ID
-                      ? "(connected)"
-                      : "(saved; send /start in Telegram to pair)"
-                    : "(not configured)"}
-                </span>
-              </FieldLabel>
-              <Input
-                id="telegram-token"
-                type="password"
-                autoComplete="new-password"
-                value={telegramToken}
-                onChange={(event) => setTelegramToken(event.target.value)}
-                className="mt-1 h-10 w-full border border-zinc-300 px-3 text-sm"
-              />
-            </Field>
-            {settings.configuredSecrets.TELEGRAM_BOT_TOKEN && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-2"
-                disabled={isPending}
-                onClick={() => onSubmit({ TELEGRAM_BOT_TOKEN: "" }, clearSecretFields)}
-              >
-                Disable Telegram
-              </Button>
-            )}
-          </FieldSet>
           <DialogFooter className="flex justify-end gap-2 border-0 bg-transparent p-0">
             <Button type="button" variant="outline" onClick={onClose}>
               Close

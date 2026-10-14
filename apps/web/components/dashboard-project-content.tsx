@@ -18,7 +18,6 @@ interface WorkspaceLayout {
   previewShare: number
   activityShare: number
   collapsed: Record<PanelId, boolean>
-  focused: PanelId | null
 }
 
 type ResizeDrag =
@@ -31,7 +30,6 @@ const defaultWorkspaceLayout: WorkspaceLayout = {
   previewShare: 48,
   activityShare: 50,
   collapsed: { files: false, preview: false, activity: false, tasks: false },
-  focused: null,
 }
 const panelLabels: Record<PanelId, string> = {
   files: "Files",
@@ -112,7 +110,7 @@ export const DashboardProjectContent = memo(function DashboardProjectContent() {
   const hasActiveTasks = tasks.some((item) => activeTaskStatuses.has(item.status))
   const isSandboxRunning = project.sandbox_status === "RUNNING"
   const setupReady = project.setup_status === "READY"
-  const visiblePanels = panelIds.filter((id) => !layout.collapsed[id] && (!layout.focused || layout.focused === id))
+  const visiblePanels = panelIds.filter((id) => !layout.collapsed[id])
   const desktopColumns = (["files", "preview", "right"] as const).filter((column) => {
     if (column === "files") return visiblePanels.includes("files")
     if (column === "preview") return visiblePanels.includes("preview")
@@ -127,14 +125,10 @@ export const DashboardProjectContent = memo(function DashboardProjectContent() {
   const activityVisible = visiblePanels.includes("activity")
   const tasksVisible = visiblePanels.includes("tasks")
 
-  function panelIsVisible(id: PanelId) {
-    return !layout.collapsed[id] && (!layout.focused || layout.focused === id)
-  }
-
   function panelWrapperClass(id: PanelId) {
     return cn(
       "min-h-0 min-w-0 flex-col",
-      panelIsVisible(id) ? "flex" : "hidden",
+      layout.collapsed[id] ? "hidden" : "flex",
     )
   }
 
@@ -143,30 +137,12 @@ export const DashboardProjectContent = memo(function DashboardProjectContent() {
     setLayout((current) => ({
       ...current,
       collapsed: { ...current.collapsed, [id]: !current.collapsed[id] },
-      focused: current.focused === id ? null : current.focused,
     }))
     if (willCollapse) {
       requestAnimationFrame(() => {
         document.getElementById(`restore-panel-${id}`)?.focus()
       })
     }
-  }
-
-  function toggleFocus(id: PanelId) {
-    setLayout((current) => ({
-      ...current,
-      collapsed: { ...current.collapsed, [id]: false },
-      focused: current.focused === id ? null : id,
-    }))
-  }
-
-  function applyPreset(preset: "balanced" | "code" | "agent") {
-    setLayout({
-      ...defaultWorkspaceLayout,
-      filesShare: preset === "balanced" ? 20 : 14,
-      previewShare: preset === "code" ? 58 : preset === "agent" ? 38 : 48,
-      activityShare: preset === "agent" ? 65 : 50,
-    })
   }
 
   function beginHorizontalResize(event: ReactPointerEvent<HTMLDivElement>, divider: "first" | "second") {
@@ -296,11 +272,7 @@ export const DashboardProjectContent = memo(function DashboardProjectContent() {
       </header>
 
       <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 bg-white px-3 py-2">
-        <span className="mr-1 text-[10px] font-semibold text-zinc-500 uppercase">Layout</span>
-        <Button type="button" variant="outline" size="sm" onClick={() => applyPreset("balanced")}>Balanced</Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => applyPreset("code")}>Code focus</Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => applyPreset("agent")}>Agent focus</Button>
-        <Button type="button" variant="ghost" size="sm" onClick={() => setLayout(defaultWorkspaceLayout)}>Reset</Button>
+        <Button type="button" variant="ghost" size="sm" onClick={() => setLayout(defaultWorkspaceLayout)}>Reset layout</Button>
         {layoutWarning && <span role="status" className="text-[10px] text-amber-700">{layoutWarning}</span>}
         <div className="ml-auto flex flex-wrap gap-1">
           {panelIds.filter((id) => layout.collapsed[id]).map((id) => (
@@ -313,7 +285,6 @@ export const DashboardProjectContent = memo(function DashboardProjectContent() {
               onClick={() => setLayout((current) => ({
                 ...current,
                 collapsed: { ...current.collapsed, [id]: false },
-                focused: null,
               }))}
             >
               Restore {panelLabels[id]}
@@ -383,7 +354,7 @@ export const DashboardProjectContent = memo(function DashboardProjectContent() {
         ref={gridRef}
         className="grid min-h-0 min-w-[900px] flex-1 gap-px overflow-auto bg-zinc-200 [grid-template-columns:var(--workspace-grid)]"
         style={{
-          "--workspace-grid": `${layout.focused ? layout.focused === "files" ? "1fr" : "0fr" : layout.collapsed.files ? "0fr" : `${layout.filesShare}fr`} ${firstHandleVisible ? "6px" : "0px"} ${layout.focused ? layout.focused === "preview" ? "1fr" : "0fr" : layout.collapsed.preview ? "0fr" : `${layout.previewShare}fr`} ${secondHandleVisible ? "6px" : "0px"} ${layout.focused ? layout.focused === "activity" || layout.focused === "tasks" ? "1fr" : "0fr" : activityVisible || tasksVisible ? `${Math.max(1, 100 - layout.filesShare - layout.previewShare)}fr` : "0fr"}`,
+          "--workspace-grid": `${layout.collapsed.files ? "0fr" : `${layout.filesShare}fr`} ${firstHandleVisible ? "6px" : "0px"} ${layout.collapsed.preview ? "0fr" : `${layout.previewShare}fr`} ${secondHandleVisible ? "6px" : "0px"} ${activityVisible || tasksVisible ? `${Math.max(1, 100 - layout.filesShare - layout.previewShare)}fr` : "0fr"}`,
           "--activity-share": `${layout.activityShare}fr`,
           "--tasks-share": `${100 - layout.activityShare}fr`,
         } as CSSProperties}
@@ -394,9 +365,7 @@ export const DashboardProjectContent = memo(function DashboardProjectContent() {
           action={<span className="text-[10px] text-zinc-400">{files.length}</span>}
           className="max-h-72 lg:max-h-none"
           collapsed={layout.collapsed.files}
-          focused={layout.focused === "files"}
           onToggleCollapse={() => toggleCollapse("files")}
-          onToggleFocus={() => toggleFocus("files")}
         >
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {!isSandboxRunning && <p className="p-2 text-xs text-zinc-500">Start the sandbox to browse files.</p>}
@@ -443,7 +412,7 @@ export const DashboardProjectContent = memo(function DashboardProjectContent() {
           onKeyDown={(event) => resizeWithKeyboard(event, "horizontal", "first")}
           className={cn(
             "flex cursor-col-resize touch-none items-center justify-center bg-zinc-200 hover:bg-lime-500 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-zinc-800",
-            firstHandleVisible ? "" : "lg:invisible",
+            firstHandleVisible ? "" : "invisible",
           )}
         >
           <span className="h-8 w-0.5 rounded bg-zinc-500" />
@@ -454,9 +423,7 @@ export const DashboardProjectContent = memo(function DashboardProjectContent() {
           title={selectedFile?.split(/[\\/]/).at(-1) ?? "File preview"}
           className="min-h-[340px] lg:min-h-0"
           collapsed={layout.collapsed.preview}
-          focused={layout.focused === "preview"}
           onToggleCollapse={() => toggleCollapse("preview")}
-          onToggleFocus={() => toggleFocus("preview")}
         >
           {selectedFile ? (
             <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-zinc-700">
@@ -485,7 +452,7 @@ export const DashboardProjectContent = memo(function DashboardProjectContent() {
           onKeyDown={(event) => resizeWithKeyboard(event, "horizontal", "second")}
           className={cn(
             "flex cursor-col-resize touch-none items-center justify-center bg-zinc-200 hover:bg-lime-500 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-zinc-800",
-            secondHandleVisible ? "" : "lg:invisible",
+            secondHandleVisible ? "" : "invisible",
           )}
         >
           <span className="h-8 w-0.5 rounded bg-zinc-500" />
@@ -500,9 +467,7 @@ export const DashboardProjectContent = memo(function DashboardProjectContent() {
             title="Agent activity"
             action={<span className="text-[10px] text-zinc-500">{stream.status}</span>}
             collapsed={layout.collapsed.activity}
-            focused={layout.focused === "activity"}
             onToggleCollapse={() => toggleCollapse("activity")}
-            onToggleFocus={() => toggleFocus("activity")}
           >
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
               {stream.events.slice().reverse().map((event) => (
@@ -543,9 +508,7 @@ export const DashboardProjectContent = memo(function DashboardProjectContent() {
             title="Tasks"
             action={<span className="text-[10px] text-zinc-500">{new Intl.NumberFormat("en-US").format(tokenCount)} tokens</span>}
             collapsed={layout.collapsed.tasks}
-            focused={layout.focused === "tasks"}
             onToggleCollapse={() => toggleCollapse("tasks")}
-            onToggleFocus={() => toggleFocus("tasks")}
           >
             <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
               {tasks.map((item) => (
@@ -661,7 +624,6 @@ function parseWorkspaceLayout(value: unknown): WorkspaceLayout {
   const collapsed = typeof stored.collapsed === "object" && stored.collapsed !== null
     ? stored.collapsed
     : defaultWorkspaceLayout.collapsed
-  const focused = panelIds.includes(stored.focused as PanelId) ? stored.focused as PanelId : null
   return {
     filesShare: clamp(typeof stored.filesShare === "number" ? stored.filesShare : defaultWorkspaceLayout.filesShare, 14, 38),
     previewShare: clamp(typeof stored.previewShare === "number" ? stored.previewShare : defaultWorkspaceLayout.previewShare, 24, 64),
@@ -672,7 +634,6 @@ function parseWorkspaceLayout(value: unknown): WorkspaceLayout {
       activity: collapsed.activity === true,
       tasks: collapsed.tasks === true,
     },
-    focused,
   }
 }
 

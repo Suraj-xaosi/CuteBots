@@ -50,20 +50,7 @@ services:
       SANDBOX_MINIMAL_IMAGE: ${SANDBOX_MINIMAL_IMAGE:-cutebots-sandbox-minimal:latest}
       SANDBOX_NETWORK: sandbox-net
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
-      QDRANT_HOST: qdrant
-      QDRANT_PORT: 6333
-      MEM0_HISTORY_DB_PATH: /app/data/mem0-history.db
       DATABASE_URL: file:/app/data/database.db
-    restart: unless-stopped
-    depends_on:
-      - qdrant
-    networks:
-      - app-net
-
-  qdrant:
-    image: qdrant/qdrant:latest
-    volumes:
-      - qdrant_data:/qdrant/storage
     restart: unless-stopped
     networks:
       - app-net
@@ -77,7 +64,6 @@ networks:
 
 volumes:
   agent_data:
-  qdrant_data:
   node_modules:
   agent_node_modules:
   web_node_modules:

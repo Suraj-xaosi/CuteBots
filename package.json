@@ -9,9 +9,6 @@
     "format": "turbo format",
     "typecheck": "turbo typecheck"
   },
-  "dependencies": {
-    "@qdrant/js-client-rest": "1.18.0"
-  },
   "devDependencies": {
     "@workspace/eslint-config": "*",
     "@workspace/typescript-config": "*",
@@ -25,10 +22,6 @@
     "node": ">=22"
   },
   "overrides": {
-    "@qdrant/js-client-rest": "1.18.0",
-    "mem0ai": {
-      "mysql2": "3.24.5"
-    },
     "prisma": {
       "@prisma/config": {
         "deepmerge-ts": "8.0.0"

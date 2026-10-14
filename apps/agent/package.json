@@ -9,7 +9,6 @@
     "build": "tsc -p tsconfig.json",
     "prestart": "npm run db:deploy --workspace=@workspace/db",
     "start": "node --env-file=../../.env dist/server.js",
-    "test": "tsx --test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

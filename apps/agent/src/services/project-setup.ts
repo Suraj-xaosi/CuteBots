@@ -1,5 +1,5 @@
 import type { ContainerManager, Sandbox, SandboxProfile } from "@workspace/core";
-import { RepositoryProfileDetector, GitTool } from "@workspace/core";
+import { GitTool } from "@workspace/core";
 import type { PrismaClient, SecretVault } from "@workspace/db";
 import { redactTextSecrets } from "@workspace/core";
 
@@ -33,8 +33,6 @@ export class ProjectSetupError extends Error {
 }
 
 export class ProjectSetupService {
-  private readonly profiles = new RepositoryProfileDetector();
-
   constructor(
     private readonly prisma: PrismaClient,
     private readonly containers: ContainerManager,
@@ -59,10 +57,6 @@ export class ProjectSetupService {
     const cloned = await git.cloneRepository(sandbox);
     if (!cloned.success) throw setupError(`Repository clone failed: ${cloned.output}`);
 
-    const repositoryProfile = await this.profiles.detect(project.id, sandbox);
-    for (const warning of repositoryProfile.warnings) {
-      await log(`Repository detection warning: ${warning}`);
-    }
     const files = await this.listRepositoryFiles(sandbox);
     const unsupported = findUnsupportedRuntimeSignals(files);
     if (unsupported.length > 0) {

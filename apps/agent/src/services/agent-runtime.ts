@@ -1,21 +1,12 @@
 import {
   AgentLoop,
   AgentLoopManager,
-  ContextManager,
   ContainerManager,
   GitTool,
   LLMClient,
-  Mem0MemoryStore,
-  MemoryManager,
-  TaskChannel,
-  TelegramChannel,
-  TelegramGateway,
   ToolRegistry,
   UIChannel,
   type AgentExecutor,
-  type AgentChannel,
-  type AgentLoopOptions,
-  type AgentPlan,
   type AgentTask,
 } from "@workspace/core";
 import { ErrorCode, TaskStatus, type ProviderName, type Result } from "@workspace/types";
@@ -31,7 +22,6 @@ export interface AgentRuntimeDependencies {
   containers: ContainerManager;
   sseBroker: SSEBroker;
   replies: HumanReplyInbox;
-  telegram: TelegramGateway;
 }
 
 export class AgentRuntimeFactory {
@@ -92,124 +82,20 @@ export class AgentRuntimeFactory {
       }
     }
 
-    const tavilyKey = unwrap(await this.dependencies.settings.getResolved("TAVILY_KEY"));
     const uiChannel = new UIChannel(task.id, this.dependencies.persistence, this.dependencies.sseBroker, this.dependencies.replies);
-    const channel = new TaskChannel(uiChannel, new TelegramChannel(task.id, this.dependencies.telegram));
-    let currentPlan: AgentPlan | undefined;
+    const channel = uiChannel;
     const registry = new ToolRegistry({
-      taskId: task.id,
-      repositoryUrl: project.repo_url,
-      githubToken,
-      readOnlyCloneCredential,
-      baseBranch,
-      tavilyKey,
       humanInteraction: channel,
-      publishPlan: async (plan: AgentPlan) => {
-        currentPlan = plan;
-        const logged = await this.dependencies.persistence.appendLog({
-          taskId: task.id,
-          type: "plan",
-          content: JSON.stringify(plan),
-        });
-        if (!logged.ok) throw new Error(`Unable to persist plan update: ${logged.error}`);
-        await channel.sendLog(logged.data);
-      },
     });
 
-    const memory = await this.createMemoryManager(providerName, apiKey, model, task.id, channel);
-    const context = new ContextManager(provider, memory);
-    const budget = this.readAgentBudget();
     return new AgentLoop(
       this.dependencies.persistence,
       provider,
-      context,
       registry,
       sandbox.data,
-      memory,
-      {
-        channel,
-        ...budget,
-        currentPlan: () => currentPlan,
-        modelLabel: model ?? defaultModel(providerName),
-      },
+      channel,
     );
   }
-
-  private readAgentBudget(): Pick<
-    AgentLoopOptions,
-    "maxTotalTokens" | "maxCostUsd" | "inputCostPerMillionUsd" | "outputCostPerMillionUsd"
-  > {
-    const tokenBudget = readOptionalNumber("AGENT_MAX_TOTAL_TOKENS");
-    if (tokenBudget !== undefined && (!Number.isSafeInteger(tokenBudget) || tokenBudget <= 0)) {
-      throw new Error("AGENT_MAX_TOTAL_TOKENS must be a positive safe integer");
-    }
-    const maxCostUsd = readOptionalNumber("AGENT_MAX_COST_USD");
-    const inputCostPerMillionUsd = readOptionalNumber("AGENT_INPUT_COST_PER_MILLION_USD");
-    const outputCostPerMillionUsd = readOptionalNumber("AGENT_OUTPUT_COST_PER_MILLION_USD");
-    if (maxCostUsd !== undefined && maxCostUsd <= 0) {
-      throw new Error("AGENT_MAX_COST_USD must be positive");
-    }
-    if ((inputCostPerMillionUsd !== undefined && inputCostPerMillionUsd < 0) ||
-      (outputCostPerMillionUsd !== undefined && outputCostPerMillionUsd < 0)) {
-      throw new Error("Agent token cost rates must be non-negative");
-    }
-    if (maxCostUsd !== undefined &&
-      (inputCostPerMillionUsd === undefined || outputCostPerMillionUsd === undefined)) {
-      throw new Error("AGENT_MAX_COST_USD requires both input and output token cost rates");
-    }
-    return {
-      ...(tokenBudget !== undefined ? { maxTotalTokens: tokenBudget } : {}),
-      ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
-      ...(inputCostPerMillionUsd !== undefined ? { inputCostPerMillionUsd } : {}),
-      ...(outputCostPerMillionUsd !== undefined ? { outputCostPerMillionUsd } : {}),
-    };
-  }
-
-  private async createMemoryManager(
-    providerName: ProviderName,
-    apiKey: string | undefined,
-    model: string | undefined,
-    taskId: string,
-    channel: AgentChannel,
-  ): Promise<MemoryManager | undefined> {
-    const llmProvider = unwrap(await this.dependencies.settings.getResolved("MEMORY_LLM_PROVIDER")) ?? providerName;
-    const llmKey = unwrap(await this.dependencies.settings.getResolved("MEMORY_LLM_API_KEY")) ?? apiKey;
-    const llmModel = unwrap(await this.dependencies.settings.getResolved("MEMORY_LLM_MODEL")) ?? model ?? defaultModel(providerName);
-    const embedderProvider = unwrap(await this.dependencies.settings.getResolved("MEMORY_EMBEDDER_PROVIDER")) ?? "openai";
-    const embedderKey = unwrap(await this.dependencies.settings.getResolved("MEMORY_EMBEDDER_API_KEY")) ?? process.env.OPENAI_API_KEY;
-    const embedderModel = unwrap(await this.dependencies.settings.getResolved("MEMORY_EMBEDDER_MODEL")) ?? "text-embedding-3-small";
-
-    if (!isMemoryProvider(llmProvider) || !isMemoryProvider(embedderProvider)) return undefined;
-    if (llmProvider !== "ollama" && !llmKey) return undefined;
-    if (embedderProvider !== "ollama" && !embedderKey) return undefined;
-
-    return new MemoryManager(
-      new Mem0MemoryStore({
-        qdrantHost: process.env.QDRANT_HOST ?? "localhost",
-        qdrantPort: Number(process.env.QDRANT_PORT ?? 6333),
-        historyDbPath: process.env.MEM0_HISTORY_DB_PATH,
-        llm: { provider: llmProvider, apiKey: llmKey, model: llmModel },
-        embedder: { provider: embedderProvider, apiKey: embedderKey, model: embedderModel },
-      }),
-      async (operation) => {
-        const logged = await this.dependencies.persistence.appendLog({
-          taskId,
-          type: "warn",
-          content: `Memory operation ${operation} failed; the agent continued without it.`,
-        });
-        if (!logged.ok) throw new Error(logged.error);
-        await channel.sendLog(logged.data);
-      },
-    );
-  }
-}
-
-function readOptionalNumber(name: string): number | undefined {
-  const value = process.env[name];
-  if (value === undefined || value.trim() === "") return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) throw new Error(`${name} must be a finite number`);
-  return parsed;
 }
 
 class LazyAgentExecutor implements AgentExecutor {
@@ -247,17 +133,4 @@ function unwrap<T>(result: Result<T>): T {
 
 function isProviderName(value: string): value is ProviderName {
   return value === "anthropic" || value === "openai" || value === "groq" || value === "ollama";
-}
-
-function isMemoryProvider(value: string): boolean {
-  return value === "openai" || value === "anthropic" || value === "groq" || value === "ollama";
-}
-
-function defaultModel(provider: ProviderName): string {
-  switch (provider) {
-    case "anthropic": return "claude-sonnet-4-5-20250929";
-    case "openai": return "gpt-4.1-mini";
-    case "groq": return "llama-3.3-70b-versatile";
-    case "ollama": return "llama3.1";
-  }
 }
