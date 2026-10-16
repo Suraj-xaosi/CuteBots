@@ -1,16 +1,8 @@
-export enum ProjectStatus {
-  ACTIVE = "ACTIVE",
-  STOPPED = "STOPPED",
-}
-
 export enum TaskStatus {
-  PENDING = "PENDING",
   RUNNING = "RUNNING",
-  PAUSED = "PAUSED",
+  INTERRUPTED = "INTERRUPTED",
   DONE = "DONE",
-  UNVERIFIED = "UNVERIFIED",
   FAILED = "FAILED",
-  CANCELLED = "CANCELLED",
 }
 
 export enum SandboxStatus {

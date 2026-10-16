@@ -1,299 +1,179 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { isCommandFailure, Tool, type ToolResult } from "./tool.js";
-import type { GitPushService } from "./git-push-broker.js";
 import type { Sandbox } from "../sandbox.js";
-import type { HumanInteraction } from "./ask-human-tool.js";
 import { redactTextSecrets } from "../security/secret-redaction.js";
-import {
-  isPullRequest,
-  isSafeBranch,
-  parseGitHubRepositoryUrl,
-  readApiMessage,
-  safeTaskId,
-  shellQuote,
-} from "./git-tool-utils.js";
+import { isCommandFailure, Tool, type ToolResult } from "./tool.js";
 
-const gitArgsSchema = z.object({
-  operation: z.enum(["clone", "commit", "push", "checkout", "status", "create_pr"]),
-  branch: z.string().trim().min(1).max(250).optional(),
-  message: z.string().trim().min(1).max(10_000).optional(),
-  title: z.string().trim().min(1).max(256).optional(),
-  body: z.string().max(65_000).optional(),
+const pushChangesSchema = z.object({
+  commit_message: z.string().trim().min(1).max(500).describe("Commit message for the project's changes"),
 }).strict();
 
-export interface GitToolOptions {
-  repositoryUrl: string;
-  taskId: string;
-  githubToken?: string;
-  readOnlyCloneCredential?: string;
-  pushBroker?: GitPushService;
-  humanInteraction?: HumanInteraction;
-  baseBranch?: string;
-  fetcher?: typeof fetch;
-}
+export class PushChangesTool extends Tool<typeof pushChangesSchema> {
+  readonly name = "push_changes";
+  readonly description = "Commit all workspace changes and push them to the project's working branch. Use only after the user explicitly asks to commit or push; never push to main or master.";
+  protected readonly schema = pushChangesSchema;
 
-const DELIVERY_APPROVAL_TIMEOUT_MS = 10 * 60 * 1_000;
-
-export class GitTool extends Tool<typeof gitArgsSchema> {
-  readonly name = "git_operation";
-  readonly description = "Clone, inspect, commit, switch branches, push the task branch, or open a GitHub pull request.";
-  protected readonly schema = gitArgsSchema;
-  private readonly taskBranch: string;
-  private readonly fetcher: typeof fetch;
-  private verifiedEvidence: string | undefined;
-  private verifiedChangedFiles: string[] = [];
-  private readonly baseBranch: string;
-
-  constructor(private readonly options: GitToolOptions) {
+  constructor(
+    private readonly token: string | undefined,
+    private readonly repositoryUrl: string,
+    private readonly branchName: string,
+  ) {
     super();
-    this.taskBranch = `agent/${options.taskId}`;
-    this.fetcher = options.fetcher ?? fetch;
-    this.baseBranch = options.baseBranch?.trim() || "main";
-  }
-
-  setVerifiedEvidence(evidence?: string, changedFiles: string[] = []): void {
-    this.verifiedEvidence = evidence;
-    this.verifiedChangedFiles = changedFiles;
   }
 
   protected async executeValidated(
-    args: z.output<typeof gitArgsSchema>,
+    args: z.output<typeof pushChangesSchema>,
     sandbox: Sandbox,
-    signal?: AbortSignal,
   ): Promise<ToolResult> {
-    switch (args.operation) {
-      case "clone":
-        return this.clone(sandbox);
-      case "commit":
-        return this.commit(sandbox, args.message);
-      case "push":
-        return this.push(sandbox, args.branch, signal);
-      case "checkout":
-        return this.checkout(sandbox, args.branch);
-      case "status":
-        return this.runGit(sandbox, "git status --short --branch");
-      case "create_pr":
-        return this.createPullRequest(sandbox, args.title, args.body, args.branch, signal);
+    if (!this.token) {
+      return { success: false, output: "No GitHub token is configured. Add a repository-scoped token with Contents read/write permission before pushing." };
     }
-  }
-
-  async prepareWorkspace(sandbox: Sandbox, workspaceReady: boolean): Promise<ToolResult> {
-    if (!isSafeBranch(this.baseBranch)) return this.failed("Configured base branch is invalid");
-    let warning = "";
-    if (!workspaceReady) {
-      const cloned = await this.clone(sandbox);
-      if (!cloned.success) return cloned;
-    } else {
-      const checkoutMain = await this.runGit(sandbox, `git switch ${this.baseBranch}`);
-      if (!checkoutMain.success) {
-        warning = `WARNING: could not switch to ${this.baseBranch}; creating the task branch from the current checkout. `;
-      } else {
-        const pulled = await this.runGit(sandbox, `git pull --ff-only origin ${this.baseBranch}`);
-        if (!pulled.success) {
-          warning = `WARNING: git pull failed; creating the task branch from the last known ${this.baseBranch}. `;
-        }
-      }
+    if (/[\r\n]/.test(this.token)) {
+      return { success: false, output: "The configured GitHub token contains invalid newline characters." };
+    }
+    if (
+      !this.branchName ||
+      !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(this.branchName) ||
+      this.branchName.split("/").some((part) => part === "." || part === "..") ||
+      /^(main|master)$/i.test(this.branchName)
+    ) {
+      return { success: false, output: "The project working branch is invalid or protected from agent pushes." };
     }
 
-    const branch = await this.runGit(sandbox, `git switch --create ${shellQuote(this.taskBranch)}`);
-    if (!branch.success) return branch;
-    return { success: true, output: `${warning}Workspace ready on ${this.taskBranch}`.trim() };
-  }
-
-  async cloneRepository(sandbox: Sandbox): Promise<ToolResult> {
-    return this.clone(sandbox);
-  }
-
-  private async clone(sandbox: Sandbox): Promise<ToolResult> {
-    const repository = parseGitHubRepositoryUrl(this.options.repositoryUrl);
-    if (!repository.ok) return this.failed(repository.error);
-
-    const existing = await sandbox.exec("git rev-parse --is-inside-work-tree");
-    if (existing.ok && existing.data.trim() === "true") {
-      return { success: true, output: "Repository is already present in the workspace" };
-    }
-
-    const askpassPath = `.cutebots-askpass-${safeTaskId(this.options.taskId)}.sh`;
-    if (this.options.readOnlyCloneCredential) {
-      if (/\r|\n/.test(this.options.readOnlyCloneCredential)) {
-        return this.failed("Read-only clone credential contains invalid newline characters");
-      }
-      const askpass = [
-        "#!/bin/sh",
-        'case "$1" in',
-        '  *Username*) printf "%s\\n" "x-access-token" ;;',
-        `  *) printf "%s\\n" ${shellQuote(this.options.readOnlyCloneCredential)} ;;`,
-        "esac",
-        "",
-      ].join("\n");
-      const written = await sandbox.writeFile(askpassPath, askpass);
-      if (!written.ok) return this.failed(written.error);
-    }
-
-    let cloneResult: ToolResult;
-    try {
-      const authPrefix = this.options.readOnlyCloneCredential
-        ? `chmod 700 ${shellQuote(`/workspace/${askpassPath}`)} && GIT_ASKPASS=${shellQuote(`/workspace/${askpassPath}`)} GIT_TERMINAL_PROMPT=0 `
-        : "";
-      cloneResult = await this.runGit(
-        sandbox,
-        `${authPrefix}git clone -- ${shellQuote(repository.data.cloneUrl)} .`,
-      );
-    } finally {
-      if (this.options.readOnlyCloneCredential) {
-        const removed = await sandbox.exec(`rm -f -- ${shellQuote(`/workspace/${askpassPath}`)}`);
-        if (!removed.ok || isCommandFailure(removed.data)) {
-          cloneResult = this.failed("Credential cleanup failed; destroy this sandbox before reuse");
-        }
-      }
-    }
-    return cloneResult;
-  }
-
-  private async commit(sandbox: Sandbox, message?: string): Promise<ToolResult> {
-    if (!message) return this.failed("A commit message is required");
-    if (!this.verifiedEvidence) return this.failed("Commit is blocked until the changed files pass the verification gate");
-    if (this.verifiedChangedFiles.length === 0) return this.failed("Commit is blocked because verification found no task-owned changed files");
-    const verifiedMessage = redactTextSecrets([
-      message,
-      "",
-      "Verification evidence:",
-      this.verifiedEvidence,
-    ].join("\n"));
-    return this.runGit(
-      sandbox,
-      `git add -- ${this.verifiedChangedFiles.map(shellQuote).join(" ")} && git commit -m ${shellQuote(verifiedMessage)}`,
-    );
-  }
-
-  private async push(sandbox: Sandbox, requestedBranch?: string, signal?: AbortSignal): Promise<ToolResult> {
-    if (requestedBranch && requestedBranch !== this.taskBranch) {
-      return this.failed(`Pushes are restricted to ${this.taskBranch}`);
-    }
-    const currentBranch = await sandbox.exec("git branch --show-current");
-    if (!currentBranch.ok) return this.failed(currentBranch.error);
-    if (currentBranch.data.trim() !== this.taskBranch) {
-      return this.failed(`Refusing to push: checked-out branch must be ${this.taskBranch}`);
-    }
-    if (!this.options.pushBroker) {
-      return this.failed("Host-side Git push broker is not configured; sandbox cannot push directly");
-    }
-    if (!this.verifiedEvidence) return this.failed("Push is blocked until the changed files pass the verification gate");
-    const approval = await this.requestDeliveryApproval(
-      `push branch ${this.taskBranch} to the repository`,
-      signal,
-    );
-    if (approval) return approval;
-    const result = await this.options.pushBroker.push(this.options.taskId, this.taskBranch, sandbox);
-    return { success: result.success, output: this.redact(result.output) };
-  }
-
-  private async checkout(sandbox: Sandbox, branch?: string): Promise<ToolResult> {
-    if (!branch || !isSafeBranch(branch)) return this.failed("A valid branch name is required");
-    return this.runGit(sandbox, `git switch -- ${shellQuote(branch)}`);
-  }
-
-  private async createPullRequest(
-    sandbox: Sandbox,
-    title?: string,
-    body?: string,
-    requestedBranch?: string,
-    signal?: AbortSignal,
-  ): Promise<ToolResult> {
-    if (!this.options.githubToken) return this.failed("GitHub token is not configured");
-    if (!title) return this.failed("A pull request title is required");
-    if (requestedBranch && requestedBranch !== this.taskBranch) {
-      return this.failed(`Pull requests are restricted to ${this.taskBranch}`);
+    const remote = await sandbox.exec("git remote get-url origin");
+    if (!remote.ok) return { success: false, output: redactTextSecrets(remote.error) };
+    if (isCommandFailure(remote.data)) return { success: false, output: redactTextSecrets(remote.data) };
+    if (!sameGitHubRepository(remote.data.trim(), this.repositoryUrl)) {
+      return { success: false, output: "The origin remote does not match this project's GitHub repository; refusing to push." };
     }
 
     const branch = await sandbox.exec("git branch --show-current");
-    if (!branch.ok) return this.failed(branch.error);
-    if (branch.data.trim() !== this.taskBranch) {
-      return this.failed(`Pull requests require the ${this.taskBranch} branch`);
+    if (!branch.ok) return { success: false, output: redactTextSecrets(branch.error) };
+    if (isCommandFailure(branch.data)) return { success: false, output: redactTextSecrets(branch.data) };
+    if (branch.data.trim() !== this.branchName) {
+      return { success: false, output: `Current branch ${branch.data.trim() || "(detached)"} is not the project's working branch ${this.branchName}; refusing to push.` };
     }
-    if (!this.verifiedEvidence) return this.failed("Pull request creation is blocked until the changed files pass the verification gate");
 
-    const repository = parseGitHubRepositoryUrl(this.options.repositoryUrl);
-    if (!repository.ok) return this.failed(repository.error);
-    const detectedBase = await sandbox.exec("git symbolic-ref --quiet --short refs/remotes/origin/HEAD");
-    const remoteHead = detectedBase.ok ? detectedBase.data.trim() : "";
-    const remoteBase = remoteHead.startsWith("origin/") ? remoteHead.slice("origin/".length) : "";
-    const baseBranch = isSafeBranch(remoteBase) ? remoteBase : this.baseBranch;
-    if (!isSafeBranch(baseBranch)) return this.failed("Configured pull request base branch is invalid");
-    const approval = await this.requestDeliveryApproval(
-      `create a pull request from ${this.taskBranch} into ${baseBranch}`,
-      signal,
+    const commit = await sandbox.exec(
+      `git add --all && if git diff --cached --quiet; then printf '%s\\n' 'No new changes to commit'; else git -c user.name=CuteBots -c user.email=cutebots@localhost commit -m ${shellQuote(args.commit_message)}; fi`,
     );
-    if (approval) return approval;
+    if (!commit.ok) return { success: false, output: redactTextSecrets(commit.error) };
+    if (isCommandFailure(commit.data)) return { success: false, output: redactTextSecrets(commit.data) };
 
-    try {
-      const response = await this.fetcher(
-        `https://api.github.com/repos/${repository.data.owner}/${repository.data.name}/pulls`,
-        {
-          method: "POST",
-          headers: {
-            Accept: "application/vnd.github+json",
-            Authorization: `Bearer ${this.options.githubToken}`,
-            "Content-Type": "application/json",
-            "X-GitHub-Api-Version": "2022-11-28",
-          },
-          body: JSON.stringify({
-            title,
-            body: redactTextSecrets([
-              body?.trim(),
-              "## CuteBots verification evidence",
-              `Base branch: ${baseBranch}`,
-              this.verifiedEvidence,
-            ].filter(Boolean).join("\n\n")),
-            head: this.taskBranch,
-            base: baseBranch,
-          }),
-          signal: AbortSignal.timeout(15_000),
-        },
+    const askpassPath = `/tmp/cutebots-askpass-${randomUUID()}.sh`;
+    const askpassScript = [
+      "#!/bin/sh",
+      'case "$1" in',
+      '  *Username*) printf "%s\\n" "x-access-token" ;;',
+      `  *) printf "%s\\n" ${shellQuote(this.token)} ;;`,
+      "esac",
+      "",
+    ].join("\n");
+    const pushed = await sandbox.exec(
+      `umask 077; askpass=${shellQuote(askpassPath)}; trap 'rm -f -- "$askpass"' EXIT HUP INT TERM; printf %s ${shellQuote(askpassScript)} > "$askpass" && chmod 700 "$askpass" && GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 git push origin HEAD:${shellQuote(this.branchName)}`,
+    );
+    if (!pushed.ok) {
+      return {
+        success: false,
+        output: `${redactTextSecrets(pushed.error)}\nThe commit remains in the local sandbox; no push was confirmed.`,
+      };
+    }
+    const output = redactTextSecrets(pushed.data);
+    if (isCommandFailure(output)) {
+      return {
+        success: false,
+        output: `${output}\nThe commit remains in the local sandbox; no push was confirmed.`,
+      };
+    }
+    return { success: true, output: `${redactTextSecrets(commit.data ?? "")}\n${output}`.trim() };
+  }
+}
+
+export async function cloneGitHubRepository(
+  sandbox: Sandbox,
+  repositoryUrl: string,
+  projectId: string,
+  token?: string,
+): Promise<ToolResult> {
+  let repository: URL;
+  try {
+    repository = new URL(repositoryUrl);
+  } catch {
+    return { success: false, output: "Repository URL is invalid" };
+  }
+  if (
+    repository.protocol !== "https:" ||
+    repository.hostname !== "github.com" ||
+    repository.username ||
+    repository.password ||
+    repository.search ||
+    repository.hash ||
+    repository.pathname.split("/").filter(Boolean).length !== 2
+  ) {
+    return { success: false, output: "Repository URL must be a clean HTTPS GitHub URL" };
+  }
+  if (token && /[\r\n]/.test(token)) {
+    return { success: false, output: "GitHub token contains invalid newline characters" };
+  }
+
+  const existing = await sandbox.exec("git rev-parse --is-inside-work-tree");
+  if (existing.ok && existing.data.trim() === "true") {
+    return { success: true, output: "Repository is already present in the workspace" };
+  }
+
+  const askpassFile = `cutebots-askpass-${randomUUID()}.sh`;
+  const workspaceAskpassPath = `/workspace/${askpassFile}`;
+  const temporaryAskpassPath = `/tmp/${askpassFile}`;
+  if (token) {
+    const askpass = [
+      "#!/bin/sh",
+      'case "$1" in',
+      '  *Username*) printf "%s\\n" "x-access-token" ;;',
+      `  *) printf "%s\\n" ${shellQuote(token)} ;;`,
+      "esac",
+      "",
+    ].join("\n");
+    const written = await sandbox.writeFile(askpassFile, askpass);
+    if (!written.ok) return { success: false, output: written.error };
+  }
+
+  let result: { ok: boolean; data?: string; error?: string };
+  try {
+    const authPrefix = token
+      ? `mv -- ${shellQuote(workspaceAskpassPath)} ${shellQuote(temporaryAskpassPath)} && chmod 700 ${shellQuote(temporaryAskpassPath)} && GIT_ASKPASS=${shellQuote(temporaryAskpassPath)} GIT_TERMINAL_PROMPT=0 `
+      : "";
+    result = await sandbox.exec(`${authPrefix}git clone -- ${shellQuote(repository.href.replace(/\/$/, ""))} .`);
+  } finally {
+    if (token) {
+      const removed = await sandbox.exec(
+        `rm -f -- ${shellQuote(workspaceAskpassPath)} ${shellQuote(temporaryAskpassPath)}`,
       );
-      const data: unknown = await response.json();
-      if (!response.ok) {
-        return this.failed(`GitHub API returned ${response.status}: ${readApiMessage(data)}`);
+      if (!removed.ok) {
+        return { success: false, output: "Credential cleanup failed; destroy this sandbox before reuse" };
       }
-      if (!isPullRequest(data)) return this.failed("GitHub returned an invalid pull request response");
-      return { success: true, output: data.html_url };
-    } catch (error) {
-      return this.failed(error instanceof Error ? error.message : "GitHub API request failed");
     }
   }
 
-  private async requestDeliveryApproval(target: string, signal?: AbortSignal): Promise<ToolResult | undefined> {
-    if (!this.options.humanInteraction) {
-      return this.failed("Delivery is blocked because an explicit user approval channel is unavailable");
-    }
-    const approval = await this.options.humanInteraction.ask(
-      `Approve ${target}? Reply exactly APPROVE to continue; any other reply cancels the action.`,
-      DELIVERY_APPROVAL_TIMEOUT_MS,
-      signal,
-    );
-    if (!approval.ok) return this.failed(`Delivery approval was not received: ${approval.error}`);
-    if (approval.data.trim().toUpperCase() !== "APPROVE") {
-      return this.failed("Delivery was not approved; no remote operation was performed");
-    }
-    return undefined;
-  }
+  const output = redactTextSecrets(result.ok ? result.data ?? "" : result.error ?? "Git clone failed");
+  return result.ok && !isCommandFailure(output)
+    ? { success: true, output }
+    : { success: false, output };
+}
 
-  private async runGit(sandbox: Sandbox, command: string): Promise<ToolResult> {
-    const result = await sandbox.exec(command);
-    if (!result.ok) return this.failed(result.error);
-    const output = this.redact(result.data);
-    return isCommandFailure(output)
-      ? { success: false, output }
-      : { success: true, output };
-  }
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
 
-  private redact(output: string): string {
-    return [this.options.githubToken, this.options.readOnlyCloneCredential]
-      .filter((token): token is string => Boolean(token))
-      .reduce((redacted, token) => redacted.split(token).join("***"), output);
-  }
-
-  private failed(output: string): ToolResult {
-    return { success: false, output: this.redact(output) };
+function sameGitHubRepository(left: string, right: string): boolean {
+  try {
+    const normalize = (value: string) => {
+      const url = new URL(value);
+      if (url.protocol !== "https:" || url.hostname !== "github.com" || url.username || url.password) return null;
+      return url.pathname.replace(/\/+$/, "").replace(/\.git$/i, "").toLowerCase();
+    };
+    const leftPath = normalize(left);
+    return leftPath !== null && leftPath === normalize(right);
+  } catch {
+    return false;
   }
 }

@@ -4,15 +4,10 @@ import type { TaskService } from "../services/task-service.js";
 import { parseId, parseRequest } from "../http/validation.js";
 
 const replySchema = z.object({ reply: z.string().trim().min(1).max(20_000) }).strict();
+const continuationSchema = z.object({ continuation: z.string().trim().min(1).max(20_000) }).strict();
 
 export function createTaskRouter(tasks: TaskService): Router {
   const router = express.Router();
-
-  router.get("/:taskId/usage", async (request, response) => {
-    const taskId = parseId(request.params.taskId, "task id");
-    const usage = await tasks.getUsage(taskId);
-    response.status(200).json(usage);
-  });
 
   router.post("/:taskId/reply", async (request, response) => {
     const taskId = parseId(request.params.taskId, "task id");
@@ -29,8 +24,9 @@ export function createTaskRouter(tasks: TaskService): Router {
 
   router.post("/:taskId/resume", async (request, response) => {
     const taskId = parseId(request.params.taskId, "task id");
-    const result = await tasks.resume(taskId);
-    response.status(202).json(result.ok ? result.data : result);
+    const { continuation } = parseRequest(continuationSchema, request.body);
+    const result = await tasks.resume(taskId, continuation);
+    response.status(202).json(result);
   });
 
   return router;

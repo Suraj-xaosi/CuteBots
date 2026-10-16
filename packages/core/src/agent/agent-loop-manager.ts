@@ -1,93 +1,51 @@
-import { ErrorCode, TaskStatus, type Result } from "@workspace/types";
-import type { AgentPersistence, AgentQueueReceipt, AgentTask, AgentExecutor } from "./agent-types.js";
+import { ErrorCode, type Result } from "@workspace/types";
+import type { AgentTask, AgentExecutor } from "./agent-types.js";
 
 export type AgentExecutorFactory = (task: AgentTask) => AgentExecutor;
 
-interface ProjectQueue {
-  activeTaskId?: string;
-  activeExecutor?: AgentExecutor;
-  pending: AgentTask[];
-}
-
 export class AgentLoopManager {
   private static instance: AgentLoopManager | undefined;
-  private readonly projects = new Map<string, ProjectQueue>();
+  private readonly projects = new Map<string, { taskId: string; executor: AgentExecutor }>();
 
-  private constructor(
-    private readonly createExecutor: AgentExecutorFactory,
-    private readonly persistence: AgentPersistence,
-  ) {}
+  private constructor(private readonly createExecutor: AgentExecutorFactory) {}
 
-  static getInstance(
-    createExecutor?: AgentExecutorFactory,
-    persistence?: AgentPersistence,
-  ): AgentLoopManager {
+  static getInstance(createExecutor?: AgentExecutorFactory): AgentLoopManager {
     if (!this.instance) {
-      if (!createExecutor || !persistence) {
-        throw new Error("AgentLoopManager must be initialized with an executor factory and persistence");
+      if (!createExecutor) {
+        throw new Error("AgentLoopManager must be initialized with an executor factory");
       }
-      this.instance = new AgentLoopManager(createExecutor, persistence);
+      this.instance = new AgentLoopManager(createExecutor);
     }
     return this.instance;
   }
 
-  enqueue(task: AgentTask): Result<AgentQueueReceipt> {
-    const project = this.projects.get(task.projectId) ?? { pending: [] };
-    if (project.activeTaskId === task.id || project.pending.some((queued) => queued.id === task.id)) {
+  start(task: AgentTask): Result<void> {
+    if (this.projects.has(task.projectId)) {
       return {
         ok: false,
-        error: `Task ${task.id} is already active or queued`,
+        error: "This project already has an active task",
         code: ErrorCode.TASK_ALREADY_RUNNING,
       };
     }
 
-    project.pending.push(task);
-    this.projects.set(task.projectId, project);
-    const queued = Boolean(project.activeTaskId);
-    const position = queued ? project.pending.length : 0;
-    this.startNext(task.projectId, project);
-    return { ok: true, data: { queued, position } };
+    const executor = this.createExecutor(task);
+    this.projects.set(task.projectId, { taskId: task.id, executor });
+    void executor.run(task).catch((error: unknown) => {
+      console.error(`Agent executor failed for task ${task.id}:`, error);
+    }).finally(() => {
+      const active = this.projects.get(task.projectId);
+      if (active?.taskId === task.id) this.projects.delete(task.projectId);
+    });
+    return { ok: true, data: undefined };
   }
 
   async cancel(taskId: string): Promise<Result<void>> {
-    for (const [projectId, project] of this.projects) {
-      if (project.activeTaskId === taskId) {
-        project.activeExecutor?.stop();
-        return { ok: true, data: undefined };
-      }
-
-      const queuedIndex = project.pending.findIndex((task) => task.id === taskId);
-      if (queuedIndex >= 0) {
-        const [task] = project.pending.splice(queuedIndex, 1);
-        const updated = await this.persistence.updateTaskStatus(taskId, TaskStatus.CANCELLED, "Cancelled while queued");
-        if (!updated.ok) {
-          if (task) project.pending.splice(queuedIndex, 0, task);
-          return updated;
-        }
-        if (!project.activeTaskId && project.pending.length === 0) this.projects.delete(projectId);
+    for (const active of this.projects.values()) {
+      if (active.taskId === taskId) {
+        active.executor.stop();
         return { ok: true, data: undefined };
       }
     }
-
-    return { ok: false, error: `Task ${taskId} is not active or queued`, code: ErrorCode.TASK_NOT_FOUND };
-  }
-
-  private startNext(projectId: string, project: ProjectQueue): void {
-    if (project.activeTaskId) return;
-    const task = project.pending.shift();
-    if (!task) {
-      this.projects.delete(projectId);
-      return;
-    }
-
-    const executor = this.createExecutor(task);
-    project.activeTaskId = task.id;
-    project.activeExecutor = executor;
-    void executor.run(task).catch(() => undefined).finally(() => {
-      if (project.activeTaskId !== task.id) return;
-      project.activeTaskId = undefined;
-      project.activeExecutor = undefined;
-      this.startNext(projectId, project);
-    });
+    return { ok: false, error: `Task ${taskId} is not active`, code: ErrorCode.TASK_NOT_FOUND };
   }
 }

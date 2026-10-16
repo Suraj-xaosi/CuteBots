@@ -4,12 +4,14 @@ export interface AgentTask {
   id: string;
   projectId: string;
   description: string;
+  branchName?: string;
+  projectContext?: string;
   resume?: boolean;
+  continuation?: string;
 }
 
 export interface StoredAgentMessage {
   taskId: string;
-  projectId: string;
   role: LLMMessage["role"];
   content: string;
   toolCallsJson?: string | null;
@@ -26,23 +28,17 @@ export interface AgentLogEvent {
 
 export interface AgentPersistence {
   loadMessages(taskId: string): Promise<Result<StoredAgentMessage[]>>;
-  loadTokenUsage(taskId: string): Promise<Result<{ inputTokens: number; outputTokens: number }>>;
   appendMessage(message: StoredAgentMessage): Promise<Result<void>>;
   updateTaskStatus(taskId: string, status: TaskStatus, failReason?: string): Promise<Result<void>>;
+  updateTaskSummary(taskId: string, summary: string): Promise<Result<void>>;
   appendLog(input: Omit<AgentLogEvent, "id" | "createdAt">): Promise<Result<AgentLogEvent>>;
   listLogsAfter(taskId: string, afterId: number, limit: number): Promise<Result<AgentLogEvent[]>>;
-  recordTokenUsage(taskId: string, inputTokens: number, outputTokens: number): Promise<Result<void>>;
 }
 
 export interface AgentChannel {
   sendMessage(text: string): Promise<void>;
   sendLog(event: AgentLogEvent): Promise<void>;
   waitForReply(timeoutMs: number, signal?: AbortSignal): Promise<Result<string>>;
-}
-
-export interface AgentQueueReceipt {
-  queued: boolean;
-  position: number;
 }
 
 export interface AgentExecutor {

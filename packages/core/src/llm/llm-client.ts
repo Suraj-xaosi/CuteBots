@@ -57,7 +57,19 @@ export class LLMClient implements LLMProvider {
       const model = tools.length
         ? this.model.bindTools(tools.map(toModelTool))
         : this.model;
-      const response = await model.invoke(toLangChainMessages(messages, systemPrompt), { signal });
+      let response;
+      try {
+        response = await model.invoke(toLangChainMessages(messages, systemPrompt), { signal });
+      } catch (error) {
+        if (this.name !== "groq" || !tools.length || !isUnknownToolValidationError(error)) throw error;
+        const retryPrompt = [
+          systemPrompt,
+          "The previous response was rejected because it called an unavailable tool.",
+          `Retry using only these exact tool names: ${tools.map((tool) => tool.name).join(", ")}.`,
+          "Do not use any other tool name.",
+        ].join("\n");
+        response = await model.invoke(toLangChainMessages(messages, retryPrompt), { signal });
+      }
       if (!AIMessage.isInstance(response)) {
         return { ok: false, error: "Model returned a non-assistant message", code: ErrorCode.LLM_API_ERROR };
       }
@@ -153,6 +165,11 @@ function readFinishReason(metadata: Record<string, unknown>): "length" | "error"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isUnknownToolValidationError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /attempted to call tool .+ which was not in request\.tools/i.test(error.message);
 }
 
 function defaultModel(provider: ProviderName): string {

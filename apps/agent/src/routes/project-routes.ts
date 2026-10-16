@@ -7,13 +7,17 @@ import { parseId, parseRequest } from "../http/validation.js";
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
   repo_url: z.string().url().max(2_000),
-  github_token: z.string().min(8).max(500).optional(),
-  clone_credential: z.string().min(1).max(500).optional(),
-  sandbox_type: z.enum(["node", "minimal"]).default("node"),
+  github_token: z.string().min(1).max(500).optional(),
 }).strict();
 
 const createTaskSchema = z.object({
   description: z.string().trim().min(1).max(20_000),
+}).strict();
+const projectContextSchema = z.object({
+  context: z.string().max(20_000),
+}).strict();
+const githubTokenSchema = z.object({
+  github_token: z.string().min(1).max(500),
 }).strict();
 
 export function createProjectRouter(projects: ProjectService, tasks: TaskService): Router {
@@ -29,6 +33,18 @@ export function createProjectRouter(projects: ProjectService, tasks: TaskService
     response.status(201).json({ project });
   });
 
+  router.put("/:projectId/context", async (request, response) => {
+    const projectId = parseId(request.params.projectId, "project id");
+    const { context } = parseRequest(projectContextSchema, request.body);
+    response.json({ project: await projects.updateContext(projectId, context) });
+  });
+
+  router.put("/:projectId/github-token", async (request, response) => {
+    const projectId = parseId(request.params.projectId, "project id");
+    const { github_token } = parseRequest(githubTokenSchema, request.body);
+    response.json({ project: await projects.updateGithubToken(projectId, github_token) });
+  });
+
   router.get("/:projectId/tasks", async (request, response) => {
     const projectId = parseId(request.params.projectId, "project id");
     const limit = request.query.limit === undefined ? 50 : Number(request.query.limit);
@@ -40,14 +56,9 @@ export function createProjectRouter(projects: ProjectService, tasks: TaskService
     response.json({ tasks: await tasks.list(projectId, limit, cursor) });
   });
 
-  router.post("/:projectId/setup/retry", async (request, response) => {
+  router.post("/:projectId/provision/retry", async (request, response) => {
     const projectId = parseId(request.params.projectId, "project id");
-    response.status(202).json({ project: await projects.retrySetup(projectId) });
-  });
-
-  router.post("/:projectId/setup/switch-to-node", async (request, response) => {
-    const projectId = parseId(request.params.projectId, "project id");
-    response.status(202).json({ project: await projects.switchToNodeSandbox(projectId) });
+    response.status(202).json({ project: await projects.retryProvisioning(projectId) });
   });
 
   router.post("/:projectId/tasks", async (request, response) => {
@@ -59,7 +70,6 @@ export function createProjectRouter(projects: ProjectService, tasks: TaskService
 
   router.delete("/:projectId", async (request, response) => {
     const projectId = parseId(request.params.projectId, "project id");
-    await tasks.cancelProjectTasks(projectId);
     await projects.destroy(projectId);
     response.status(204).end();
   });

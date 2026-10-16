@@ -1,4 +1,4 @@
-import { ErrorCode, ProjectStatus, SandboxStatus, TaskStatus, type Result } from "@workspace/types";
+import { ErrorCode, SandboxStatus, TaskStatus } from "@workspace/types";
 import type { PrismaClient } from "@workspace/db";
 import type { AgentLoopManager } from "@workspace/core";
 import { ApiError } from "../http/api-error.js";
@@ -10,6 +10,7 @@ export interface TaskListItem {
   project_id: string;
   description: string;
   status: TaskStatus;
+  completion_summary: string | null;
   fail_reason: string | null;
   created_at: Date;
   updated_at: Date;
@@ -23,7 +24,8 @@ export class TaskService {
   ) {}
 
   async list(projectId: string, limit = 50, cursor?: string): Promise<TaskListItem[]> {
-    await this.requireProject(projectId);
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
+    if (!project) throw new ApiError(404, ErrorCode.TASK_NOT_FOUND, "Project not found");
     const rows = await this.prisma.task.findMany({
       where: { project_id: projectId },
       orderBy: [{ created_at: "desc" }, { id: "desc" }],
@@ -34,6 +36,7 @@ export class TaskService {
         project_id: true,
         description: true,
         status: true,
+        completion_summary: true,
         fail_reason: true,
         created_at: true,
         updated_at: true,
@@ -42,110 +45,116 @@ export class TaskService {
     return rows.map((task) => ({ ...task, status: toTaskStatus(task.status) }));
   }
 
-  async create(projectId: string, description: string): Promise<{ task: unknown; queued: boolean; position: number }> {
-    const project = await this.requireProject(projectId);
-    if (project.status !== ProjectStatus.ACTIVE) {
-      throw new ApiError(409, ErrorCode.TOOL_EXECUTION_FAILED, "Project is stopped");
-    }
-    if (project.sandbox_status !== SandboxStatus.RUNNING) {
-      throw new ApiError(503, ErrorCode.CONTAINER_NOT_FOUND, "Project sandbox is stopped");
-    }
-    if (project.setup_status !== "READY") {
-      const setupMessage = project.setup_error
-        ? `Project setup failed: ${project.setup_error}`
-        : "Project setup is still running; wait until setup is ready before starting a task.";
-      throw new ApiError(409, ErrorCode.TOOL_EXECUTION_FAILED, setupMessage);
+  async create(projectId: string, description: string): Promise<{ task: TaskListItem }> {
+    const project = await this.requireReadyProject(projectId);
+    if (project.active_task_id) {
+      throw new ApiError(409, ErrorCode.TASK_ALREADY_RUNNING, "This project already has an active task");
     }
 
-    const task = await this.prisma.task.create({
-      data: { project_id: projectId, description: description.trim(), status: TaskStatus.PENDING },
-      select: { id: true, project_id: true, description: true, status: true, created_at: true },
+    const task = await this.prisma.$transaction(async (transaction) => {
+      const created = await transaction.task.create({
+        data: { project_id: projectId, description: description.trim(), status: TaskStatus.RUNNING },
+      });
+      const claimed = await transaction.project.updateMany({
+        where: { id: projectId, active_task_id: null },
+        data: { active_task_id: created.id },
+      });
+      if (claimed.count !== 1) {
+        throw new ApiError(409, ErrorCode.TASK_ALREADY_RUNNING, "This project already has an active task");
+      }
+      return created;
     });
-    const queued = this.loops.enqueue({ id: task.id, projectId, description: task.description });
-    if (!queued.ok) {
-      await this.prisma.task.delete({ where: { id: task.id } });
-      throw new ApiError(409, queued.code, queued.error);
+
+    const started = this.loops.start({
+      id: task.id,
+      projectId,
+      description: task.description,
+      branchName: project.branch_name ?? undefined,
+      projectContext: project.context,
+    });
+    if (!started.ok) {
+      await this.prisma.task.update({
+        where: { id: task.id },
+        data: { status: TaskStatus.FAILED, fail_reason: started.error },
+      });
+      await this.prisma.project.updateMany({
+        where: { id: projectId, active_task_id: task.id },
+        data: { active_task_id: null },
+      });
+      throw new ApiError(409, started.code, started.error);
     }
-    return { task, ...queued.data };
+
+    return { task: { ...task, status: TaskStatus.RUNNING, completion_summary: null } };
   }
 
   async cancel(taskId: string): Promise<void> {
     const task = await this.prisma.task.findUnique({ where: { id: taskId } });
     if (!task) throw new ApiError(404, ErrorCode.TASK_NOT_FOUND, "Task not found");
-    if (task.status !== TaskStatus.RUNNING && task.status !== TaskStatus.PENDING) {
-      throw new ApiError(404, ErrorCode.TASK_NOT_FOUND, "Task is not running or queued");
+    if (task.status !== TaskStatus.RUNNING) {
+      throw new ApiError(409, ErrorCode.TASK_NOT_FOUND, "Task is not running");
     }
     const cancelled = await this.loops.cancel(taskId);
     if (!cancelled.ok && cancelled.code !== ErrorCode.TASK_NOT_FOUND) {
-      throw new ApiError(404, cancelled.code, cancelled.error);
+      throw new ApiError(409, cancelled.code, cancelled.error);
     }
     if (!cancelled.ok) {
-      const marked = await this.prisma.task.update({
+      const interrupted = await this.prisma.task.update({
         where: { id: taskId },
-        data: { status: TaskStatus.CANCELLED, fail_reason: "Cancelled after agent process recovery" },
+        data: {
+          status: TaskStatus.INTERRUPTED,
+          fail_reason: "Task interrupted after agent process recovery",
+        },
       });
-      void marked;
+      await this.prisma.project.updateMany({
+        where: { id: interrupted.project_id, active_task_id: taskId },
+        data: { active_task_id: null },
+      });
     }
   }
 
-  async resume(taskId: string): Promise<Result<{ queued: boolean; position: number }>> {
+  async resume(taskId: string, continuation: string): Promise<{ status: "RUNNING" }> {
     const task = await this.prisma.task.findUnique({ where: { id: taskId } });
     if (!task) throw new ApiError(404, ErrorCode.TASK_NOT_FOUND, "Task not found");
-    if (task.status !== TaskStatus.PAUSED) {
-      throw new ApiError(409, ErrorCode.TOOL_EXECUTION_FAILED, "Only paused tasks can be resumed");
+    if (task.status !== TaskStatus.INTERRUPTED) {
+      throw new ApiError(409, ErrorCode.TOOL_EXECUTION_FAILED, "Only interrupted tasks can be continued");
     }
-    const project = await this.requireProject(task.project_id);
-    if (project.status !== ProjectStatus.ACTIVE || project.sandbox_status !== SandboxStatus.RUNNING) {
-      throw new ApiError(503, ErrorCode.CONTAINER_NOT_FOUND, "Project and sandbox must be running to resume");
-    }
-    if (project.setup_status !== "READY") {
-      throw new ApiError(409, ErrorCode.TOOL_EXECUTION_FAILED, "Project setup must be ready before resuming a task");
-    }
-    const enqueued = this.loops.enqueue({
+    const project = await this.requireReadyProject(task.project_id);
+
+    await this.prisma.$transaction(async (transaction) => {
+      const claimed = await transaction.project.updateMany({
+        where: { id: project.id, active_task_id: null },
+        data: { active_task_id: task.id },
+      });
+      if (claimed.count !== 1) {
+        throw new ApiError(409, ErrorCode.TASK_ALREADY_RUNNING, "This project already has an active task");
+      }
+      await transaction.task.update({
+        where: { id: task.id },
+        data: { status: TaskStatus.RUNNING, fail_reason: null },
+      });
+    });
+
+    const started = this.loops.start({
       id: task.id,
       projectId: task.project_id,
       description: task.description,
+      continuation: continuation.trim(),
       resume: true,
+      branchName: project.branch_name ?? undefined,
+      projectContext: project.context,
     });
-    if (!enqueued.ok) throw new ApiError(409, enqueued.code, enqueued.error);
-    return enqueued;
-  }
-
-  async getUsage(taskId: string): Promise<{
-    taskId: string;
-    input_tokens: number;
-    output_tokens: number;
-    total_tokens: number;
-    latest_recorded_at: string | null;
-  }> {
-    const task = await this.prisma.task.findUnique({
-      where: { id: taskId },
-      select: {
-        id: true,
-        token_usage: {
-          select: {
-            input_tokens: true,
-            output_tokens: true,
-            created_at: true,
-          },
-          orderBy: { created_at: "desc" },
-        },
-      },
-    });
-
-    if (!task) throw new ApiError(404, ErrorCode.TASK_NOT_FOUND, "Task not found");
-
-    const inputTokens = task.token_usage.reduce((sum, entry) => sum + Number(entry.input_tokens ?? 0), 0);
-    const outputTokens = task.token_usage.reduce((sum, entry) => sum + Number(entry.output_tokens ?? 0), 0);
-    const latestRecordedAt = task.token_usage[0]?.created_at ? new Date(task.token_usage[0].created_at).toISOString() : null;
-
-    return {
-      taskId: task.id,
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      total_tokens: inputTokens + outputTokens,
-      latest_recorded_at: latestRecordedAt,
-    };
+    if (!started.ok) {
+      await this.prisma.task.update({
+        where: { id: task.id },
+        data: { status: TaskStatus.INTERRUPTED, fail_reason: started.error },
+      });
+      await this.prisma.project.updateMany({
+        where: { id: project.id, active_task_id: task.id },
+        data: { active_task_id: null },
+      });
+      throw new ApiError(409, started.code, started.error);
+    }
+    return { status: "RUNNING" };
   }
 
   async reply(taskId: string, reply: string): Promise<void> {
@@ -159,30 +168,27 @@ export class TaskService {
     }
   }
 
-  async cancelProjectTasks(projectId: string): Promise<void> {
-    const tasks = await this.prisma.task.findMany({
-      where: { project_id: projectId, status: { in: [TaskStatus.RUNNING, TaskStatus.PENDING] } },
-      select: { id: true },
-    });
-    for (const task of tasks) await this.cancel(task.id);
-  }
-
-  private async requireProject(projectId: string) {
+  private async requireReadyProject(projectId: string) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
     if (!project) throw new ApiError(404, ErrorCode.TASK_NOT_FOUND, "Project not found");
+    if (project.sandbox_status !== SandboxStatus.RUNNING) {
+      throw new ApiError(503, ErrorCode.CONTAINER_NOT_FOUND, "Project sandbox is stopped");
+    }
+    if (project.provision_status !== "READY") {
+      throw new ApiError(409, ErrorCode.TOOL_EXECUTION_FAILED, project.provision_error ?? "Repository provisioning is not ready");
+    }
     return project;
   }
 }
 
 function toTaskStatus(status: string): TaskStatus {
   switch (status) {
-    case "PENDING": return TaskStatus.PENDING;
     case "RUNNING": return TaskStatus.RUNNING;
-    case "PAUSED": return TaskStatus.PAUSED;
+    case "INTERRUPTED": return TaskStatus.INTERRUPTED;
+    case "AWAITING_APPROVAL": return TaskStatus.DONE;
     case "DONE": return TaskStatus.DONE;
-    case "UNVERIFIED": return TaskStatus.UNVERIFIED;
     case "FAILED": return TaskStatus.FAILED;
-    case "CANCELLED": return TaskStatus.CANCELLED;
-    default: throw new Error(`Unknown task status: ${status}`);
+    default:
+      throw new Error(`Unknown task status: ${status}`);
   }
 }

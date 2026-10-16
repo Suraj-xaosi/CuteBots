@@ -1,5 +1,4 @@
 import type { ReactNode } from "react"
-import { PanelTopClose, PanelTopOpen } from "lucide-react"
 
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent, CardHeader } from "@workspace/ui/components/card"
@@ -15,14 +14,10 @@ function statusTone(status: string): string {
       return "bg-amber-50 text-amber-800"
     case "PENDING":
       return "bg-amber-50 text-amber-800"
-    case "PENDING":
+    case "INTERRUPTED":
       return "bg-amber-50 text-amber-800"
-    case "PAUSED":
-      return "bg-sky-50 text-sky-800"
     case "DONE":
       return "bg-lime-50 text-lime-900"
-    case "UNVERIFIED":
-      return "bg-orange-50 text-orange-800"
     case "FAILED":
       return "bg-rose-50 text-rose-800"
     default:
@@ -48,15 +43,11 @@ export function DashboardPanel({
   action,
   children,
   className,
-  collapsed = false,
-  onToggleCollapse,
 }: {
   title: string
   action?: ReactNode
   children: ReactNode
   className?: string
-  collapsed?: boolean
-  onToggleCollapse?: () => void
 }) {
   return (
     <section role="region" aria-label={title} className={cn("flex min-h-0 flex-col", className)}>
@@ -67,18 +58,6 @@ export function DashboardPanel({
           </h2>
           <div className="flex min-w-0 items-center gap-2">
             {action}
-            {onToggleCollapse && (
-              <button
-                type="button"
-                aria-label={`${collapsed ? "Restore" : "Collapse"} ${title} panel`}
-                aria-expanded={!collapsed}
-                title={`${collapsed ? "Restore" : "Collapse"} ${title}`}
-                onClick={onToggleCollapse}
-                className="grid size-8 shrink-0 place-items-center rounded text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-zinc-800"
-              >
-                {collapsed ? <PanelTopOpen className="size-3.5" /> : <PanelTopClose className="size-3.5" />}
-              </button>
-            )}
           </div>
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col px-0">

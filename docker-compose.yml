@@ -46,8 +46,7 @@ services:
     command: ["npm", "run", "dev", "--workspace=agent"]
     environment:
       PORT: 3001
-      SANDBOX_NODE_IMAGE: ${SANDBOX_NODE_IMAGE:-${SANDBOX_IMAGE:-cutebots-sandbox-node:latest}}
-      SANDBOX_MINIMAL_IMAGE: ${SANDBOX_MINIMAL_IMAGE:-cutebots-sandbox-minimal:latest}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-cutebots-sandbox-minimal:latest}
       SANDBOX_NETWORK: sandbox-net
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       DATABASE_URL: file:/app/data/database.db

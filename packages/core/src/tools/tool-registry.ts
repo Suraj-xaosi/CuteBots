@@ -12,10 +12,18 @@ import {
   StrReplaceTool,
   WriteFileTool,
 } from "./sandbox-tools.js";
+import { PushChangesTool } from "./git-tool.js";
+import { TavilySearchTool } from "./tavily-search-tool.js";
 import { Tool, type ToolResult } from "./tool.js";
 
 export interface ToolRegistryOptions {
   humanInteraction?: HumanInteraction;
+  githubPush?: {
+    token?: string;
+    repositoryUrl: string;
+    branchName: string;
+  };
+  tavilyApiKey?: string;
 }
 
 export class ToolRegistry {
@@ -33,6 +41,14 @@ export class ToolRegistry {
       new FindFilesTool(),
       new SearchFilesTool(),
       new AskHumanTool(options.humanInteraction),
+      ...(options.tavilyApiKey ? [new TavilySearchTool(options.tavilyApiKey)] : []),
+      ...(options.githubPush
+        ? [new PushChangesTool(
+            options.githubPush.token,
+            options.githubPush.repositoryUrl,
+            options.githubPush.branchName,
+          )]
+        : []),
     ];
     this.tools = new Map(tools.map((tool) => [tool.name, tool]));
   }

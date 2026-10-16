@@ -1,26 +1,22 @@
 const AGENT_BASE_PATH = "/api"
 
-export type ProjectStatus = "ACTIVE" | "STOPPED"
-export type TaskStatus = "PENDING" | "RUNNING" | "PAUSED" | "DONE" | "UNVERIFIED" | "FAILED" | "CANCELLED"
+export type TaskStatus = "RUNNING" | "INTERRUPTED" | "DONE" | "FAILED"
 export type SandboxStatus = "RUNNING" | "STOPPED"
-export type SandboxProfile = "node" | "minimal"
-export type ProjectSetupStatus = "PENDING" | "PROVISIONING" | "READY" | "FAILED"
+export type ProjectProvisionStatus = "PENDING" | "PROVISIONING" | "READY" | "FAILED"
 
 export interface ProjectSummary {
   id: string
   name: string
   repo_url: string
+  context: string
+  github_token_configured: boolean
   container_id: string | null
-  status: ProjectStatus
+  branch_name: string | null
   sandbox_status: SandboxStatus
-  sandbox_type: string
-  workspace_ready: boolean
-  setup_status: ProjectSetupStatus
-  setup_log: string
-  setup_error: string | null
-  setup_attempts: number
-  detected_setup: string | null
+  provision_status: ProjectProvisionStatus
+  provision_error: string | null
   created_at: string
+  updated_at: string
 }
 
 export interface TaskSummary {
@@ -28,6 +24,7 @@ export interface TaskSummary {
   project_id: string
   description: string
   status: TaskStatus
+  completion_summary: string | null
   fail_reason: string | null
   created_at: string
   updated_at: string
@@ -41,25 +38,15 @@ export interface StreamEvent {
   created_at?: string
 }
 
-export interface TaskUsageSummary {
-  taskId: string
-  input_tokens: number
-  output_tokens: number
-  total_tokens: number
-  latest_recorded_at: string | null
-}
-
 export interface PublicSettings {
   values: { LLM_PROVIDER?: string; LLM_MODEL?: string }
-  configuredSecrets: { LLM_API_KEY?: boolean }
+  configuredSecrets: { LLM_API_KEY?: boolean; TAVILY_API_KEY?: boolean }
 }
 
 export interface CreateProjectInput {
   name: string
   repo_url: string
-  sandbox_type: SandboxProfile
   github_token?: string
-  clone_credential?: string
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -97,6 +84,7 @@ export async function fetchProjects(): Promise<ProjectSummary[]> {
   return response.projects.map((project) => ({
     ...project,
     created_at: new Date(project.created_at).toISOString(),
+    updated_at: new Date(project.updated_at).toISOString(),
   }))
 }
 
@@ -116,39 +104,45 @@ export async function startSandbox(projectId: string): Promise<ProjectSummary> {
   return response.project
 }
 
-export async function retryProjectSetup(projectId: string): Promise<ProjectSummary> {
-  const response = await apiRequest<{ project: ProjectSummary }>(`/api/projects/${projectId}/setup/retry`, {
+export async function retryProjectProvisioning(projectId: string): Promise<ProjectSummary> {
+  const response = await apiRequest<{ project: ProjectSummary }>(`/api/projects/${projectId}/provision/retry`, {
     method: "POST",
   })
   return response.project
 }
 
-export async function switchProjectToNodeSandbox(projectId: string): Promise<ProjectSummary> {
-  const response = await apiRequest<{ project: ProjectSummary }>(`/api/projects/${projectId}/setup/switch-to-node`, {
-    method: "POST",
-  })
-  return response.project
-}
-
-export async function createTask(projectId: string, description: string): Promise<{ task: TaskSummary; queued: boolean; position: number }> {
-  const response = await apiRequest<{ task: TaskSummary; queued: boolean; position: number }>(`/api/projects/${projectId}/tasks`, {
+export async function createTask(projectId: string, description: string): Promise<{ task: TaskSummary }> {
+  const response = await apiRequest<{ task: TaskSummary }>(`/api/projects/${projectId}/tasks`, {
     method: "POST",
     body: JSON.stringify({ description }),
   })
-  return {
-    ...response,
-    task: {
-      ...response.task,
-      created_at: new Date(response.task.created_at).toISOString(),
-      updated_at: new Date(response.task.updated_at ?? response.task.created_at).toISOString(),
-    },
-  }
+  return { task: {
+    ...response.task,
+    created_at: new Date(response.task.created_at).toISOString(),
+    updated_at: new Date(response.task.updated_at ?? response.task.created_at).toISOString(),
+  } }
 }
 
 export async function createProject(input: CreateProjectInput): Promise<ProjectSummary> {
   const response = await apiRequest<{ project: ProjectSummary }>("/projects/", {
     method: "POST",
     body: JSON.stringify(input),
+  })
+  return response.project
+}
+
+export async function updateProjectContext(projectId: string, context: string): Promise<ProjectSummary> {
+  const response = await apiRequest<{ project: ProjectSummary }>(`/projects/${projectId}/context`, {
+    method: "PUT",
+    body: JSON.stringify({ context }),
+  })
+  return response.project
+}
+
+export async function updateProjectGithubToken(projectId: string, githubToken: string): Promise<ProjectSummary> {
+  const response = await apiRequest<{ project: ProjectSummary }>(`/projects/${projectId}/github-token`, {
+    method: "PUT",
+    body: JSON.stringify({ github_token: githubToken }),
   })
   return response.project
 }
@@ -185,12 +179,11 @@ export async function fetchFileContent(projectId: string, filePath: string): Pro
   return content
 }
 
-export async function resumeTask(taskId: string): Promise<void> {
-  await apiRequest(`/tasks/${taskId}/resume`, { method: "POST" })
-}
-
-export async function fetchTaskUsage(taskId: string): Promise<TaskUsageSummary> {
-  return apiRequest<TaskUsageSummary>(`/api/tasks/${taskId}/usage`)
+export async function resumeTask(taskId: string, continuation: string): Promise<void> {
+  await apiRequest(`/tasks/${taskId}/resume`, {
+    method: "POST",
+    body: JSON.stringify({ continuation }),
+  })
 }
 
 export async function cancelTask(taskId: string): Promise<void> {

@@ -1,8 +1,8 @@
 import dotenv from "dotenv";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import { TaskStatus } from "@workspace/types";
-import { prisma, PrismaAgentPersistence } from "@workspace/db";
+import { prisma } from "@workspace/db";
+import { PrismaAgentPersistence } from "./persistence/prisma-agent-persistence.js";
 import { ContainerManager, HumanReplyInbox, SSEBroker } from "@workspace/core";
 import { createAgentApp } from "./app.js";
 import { createTaskChannelRouter } from "./task-channel-router.js";
@@ -26,14 +26,8 @@ export async function startAgentServer(): Promise<void> {
   const containers = ContainerManager.getInstance();
   const settings = new SettingsService(prisma);
   const projects = new ProjectService(prisma, containers);
-  const pendingTasks = await projects.recoverOnStartup();
+  await projects.recoverOnStartup();
   const runtime = new AgentRuntimeFactory({ prisma, persistence, settings, containers, sseBroker, replies });
-  for (const task of pendingTasks) {
-    const enqueued = runtime.loops.enqueue(task);
-    if (!enqueued.ok) {
-      await persistence.updateTaskStatus(task.id, TaskStatus.FAILED, `Startup recovery failed: ${enqueued.error}`);
-    }
-  }
   const tasks = new TaskService(prisma, runtime.loops, replies);
 
   const taskChannelRouter = createTaskChannelRouter(sseBroker, replies, {
@@ -49,7 +43,7 @@ export async function startAgentServer(): Promise<void> {
     tasks: createTaskRouter(tasks),
     taskChannels: taskChannelRouter,
     files: createFileRouter(projects),
-    sandboxes: createSandboxRouter(projects, tasks),
+    sandboxes: createSandboxRouter(projects),
     settings: createSettingsRouter(settings),
   });
   const port = parsePort(process.env.PORT);

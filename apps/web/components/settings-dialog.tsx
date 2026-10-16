@@ -28,6 +28,7 @@ interface SettingsDialogProps {
   onRetry: () => void
   onSubmit: (values: Record<string, string>, onSuccess: () => void) => void
   isPending: boolean
+  saveError: string | null
 }
 
 export function SettingsDialog({
@@ -38,6 +39,7 @@ export function SettingsDialog({
   onRetry,
   onSubmit,
   isPending,
+  saveError,
 }: SettingsDialogProps) {
   if (isLoading) {
     return (
@@ -67,6 +69,7 @@ export function SettingsDialog({
       settings={settings}
       onSubmit={onSubmit}
       isPending={isPending}
+      saveError={saveError}
     />
   )
 }
@@ -76,15 +79,18 @@ function LoadedSettingsDialog({
   settings,
   onSubmit,
   isPending,
+  saveError,
 }: {
   onClose: () => void
   settings: PublicSettings
   onSubmit: (values: Record<string, string>, onSuccess: () => void) => void
   isPending: boolean
+  saveError: string | null
 }) {
   const [provider, setProvider] = useState(settings.values.LLM_PROVIDER ?? "openai")
   const [model, setModel] = useState(settings.values.LLM_MODEL ?? "gpt-4.1-mini")
   const [apiKey, setApiKey] = useState("")
+  const [tavilyApiKey, setTavilyApiKey] = useState("")
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -93,6 +99,7 @@ function LoadedSettingsDialog({
         LLM_PROVIDER: provider,
         LLM_MODEL: model,
         ...(apiKey.trim() ? { LLM_API_KEY: apiKey.trim() } : {}),
+        ...(tavilyApiKey.trim() ? { TAVILY_API_KEY: tavilyApiKey.trim() } : {}),
       },
       clearSecretFields,
     )
@@ -100,6 +107,7 @@ function LoadedSettingsDialog({
 
   function clearSecretFields() {
     setApiKey("")
+    setTavilyApiKey("")
   }
 
   return (
@@ -154,6 +162,28 @@ function LoadedSettingsDialog({
               />
             </Field>
           )}
+          <Field>
+            <FieldLabel htmlFor="tavily-api-key" className="text-xs">
+              Tavily web search API key{" "}
+              <span className="font-normal text-zinc-500">
+                {settings.configuredSecrets.TAVILY_API_KEY
+                  ? "(configured; leave blank to keep)"
+                  : "(optional; not configured)"}
+              </span>
+            </FieldLabel>
+            <Input
+              id="tavily-api-key"
+              type="password"
+              autoComplete="new-password"
+              value={tavilyApiKey}
+              onChange={(event) => setTavilyApiKey(event.target.value)}
+              className="mt-1 h-10 w-full border border-zinc-300 px-3 text-sm"
+            />
+            <p className="mt-1 text-xs text-zinc-500">
+              Add a Tavily key to enable the agent&apos;s web_search tool.
+            </p>
+          </Field>
+          {saveError && <p role="alert" className="text-xs text-rose-700">{saveError}</p>}
           <DialogFooter className="flex justify-end gap-2 border-0 bg-transparent p-0">
             <Button type="button" variant="outline" onClick={onClose}>
               Close

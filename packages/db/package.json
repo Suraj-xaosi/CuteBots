@@ -13,11 +13,10 @@
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "7.10.0",
     "@prisma/client": "7.10.0",
-    "@workspace/core": "*",
-    "@workspace/types": "*",
     "dotenv": "^18.0.4"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "@workspace/typescript-config": "*",
     "prisma": "7.10.0",
     "typescript": "^5"

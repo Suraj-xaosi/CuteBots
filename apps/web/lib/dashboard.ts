@@ -1,9 +1,8 @@
-export const activeTaskStatuses = new Set(["PENDING", "RUNNING"])
+export const activeTaskStatuses = new Set(["RUNNING"])
 
 export const dashboardRefreshIntervals = {
   activeTasks: 3_000,
   activeTaskFiles: 5_000,
-  activeTaskUsage: 5_000,
   openSettings: 3_000,
 } as const
 

@@ -7,7 +7,7 @@ import {
   MessageRole as DatabaseMessageRole,
   TaskStatus as DatabaseTaskStatus,
   type PrismaClient,
-} from "./generated/prisma/client.js";
+} from "@workspace/db";
 import type {
   AgentLogEvent,
   AgentPersistence,
@@ -25,7 +25,6 @@ export class PrismaAgentPersistence implements AgentPersistence {
       });
       return messages.map((message) => ({
         taskId: message.task_id,
-        projectId: message.project_id,
         role: toAppMessageRole(message.role),
         content: message.content,
         toolCallsJson: message.tool_calls,
@@ -39,7 +38,6 @@ export class PrismaAgentPersistence implements AgentPersistence {
       await this.prisma.message.create({
         data: {
           task_id: message.taskId,
-          project_id: message.projectId,
           role: toDatabaseMessageRole(message.role),
           content: message.content,
           tool_calls: message.toolCallsJson ?? null,
@@ -55,12 +53,28 @@ export class PrismaAgentPersistence implements AgentPersistence {
     failReason?: string,
   ): Promise<Result<void>> {
     return this.runSafely(async () => {
-      await this.prisma.task.update({
+      const task = await this.prisma.task.update({
         where: { id: taskId },
         data: {
           status: toDatabaseTaskStatus(status),
           fail_reason: failReason ?? null,
         },
+        select: { project_id: true },
+      });
+      if (status !== TaskStatus.RUNNING) {
+        await this.prisma.project.updateMany({
+          where: { id: task.project_id, active_task_id: taskId },
+          data: { active_task_id: null },
+        });
+      }
+    });
+  }
+
+  async updateTaskSummary(taskId: string, summary: string): Promise<Result<void>> {
+    return this.runSafely(async () => {
+      await this.prisma.task.update({
+        where: { id: taskId },
+        data: { completion_summary: summary },
       });
     });
   }
@@ -103,35 +117,6 @@ export class PrismaAgentPersistence implements AgentPersistence {
     });
   }
 
-  async recordTokenUsage(
-    taskId: string,
-    inputTokens: number,
-    outputTokens: number,
-  ): Promise<Result<void>> {
-    return this.runSafely(async () => {
-      await this.prisma.tokenUsage.create({
-        data: {
-          task_id: taskId,
-          input_tokens: inputTokens,
-          output_tokens: outputTokens,
-        },
-      });
-    });
-  }
-
-  async loadTokenUsage(taskId: string): Promise<Result<{ inputTokens: number; outputTokens: number }>> {
-    return this.runSafely(async () => {
-      const usage = await this.prisma.tokenUsage.aggregate({
-        where: { task_id: taskId },
-        _sum: { input_tokens: true, output_tokens: true },
-      });
-      return {
-        inputTokens: Number(usage._sum.input_tokens ?? 0),
-        outputTokens: Number(usage._sum.output_tokens ?? 0),
-      };
-    });
-  }
-
   private async runSafely<T>(operation: () => Promise<T>): Promise<Result<T>> {
     try {
       return { ok: true, data: await operation() };
@@ -148,13 +133,10 @@ export class PrismaAgentPersistence implements AgentPersistence {
 
 function toDatabaseTaskStatus(status: TaskStatus): DatabaseTaskStatus {
   switch (status) {
-    case TaskStatus.PENDING: return DatabaseTaskStatus.PENDING;
     case TaskStatus.RUNNING: return DatabaseTaskStatus.RUNNING;
-    case TaskStatus.PAUSED: return DatabaseTaskStatus.PAUSED;
+    case TaskStatus.INTERRUPTED: return DatabaseTaskStatus.INTERRUPTED;
     case TaskStatus.DONE: return DatabaseTaskStatus.DONE;
-    case TaskStatus.UNVERIFIED: return DatabaseTaskStatus.UNVERIFIED;
     case TaskStatus.FAILED: return DatabaseTaskStatus.FAILED;
-    case TaskStatus.CANCELLED: return DatabaseTaskStatus.CANCELLED;
   }
 }
 

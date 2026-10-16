@@ -8,10 +8,11 @@ import {
   createTask,
   destroySandbox,
   replyToTask,
-  retryProjectSetup,
+  retryProjectProvisioning,
   resumeTask,
   startSandbox,
-  switchProjectToNodeSandbox,
+  updateProjectContext,
+  updateProjectGithubToken,
   updateSettings,
   type CreateProjectInput,
   type ProjectSummary,
@@ -19,27 +20,22 @@ import {
 import { dashboardQueryKeys } from "@/hooks/use-dashboard-queries"
 
 interface DashboardMutationCallbacks {
-  onNotice: (notice: string) => void
   onProjectCreated: (project: ProjectSummary) => void
   onTaskCreated: (taskId: string) => void
 }
 
 export function useDashboardMutations({
-  onNotice,
   onProjectCreated,
   onTaskCreated,
 }: DashboardMutationCallbacks) {
   const queryClient = useQueryClient()
-  const handleMutationError = (error: Error) => onNotice(error.message)
 
   const createProjectMutation = useMutation({
     mutationFn: (input: CreateProjectInput) => createProject(input),
     onSuccess: async (created) => {
       onProjectCreated(created)
-      onNotice("Project created. Preparing its sandbox.")
       await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projects })
     },
-    onError: handleMutationError,
   })
 
   const createTaskMutation = useMutation({
@@ -47,89 +43,85 @@ export function useDashboardMutations({
       createTask(projectId, description),
     onSuccess: async (created, variables) => {
       onTaskCreated(created.task.id)
-      onNotice(created.queued ? `Task queued at position ${created.position}.` : "Task started.")
       await queryClient.invalidateQueries({
         queryKey: dashboardQueryKeys.projectTasks(variables.projectId),
       })
     },
-    onError: handleMutationError,
   })
 
   const sandboxMutation = useMutation({
     mutationFn: ({ projectId, running }: { projectId: string; running: boolean }) =>
       running ? destroySandbox(projectId) : startSandbox(projectId),
     onSuccess: async (updated) => {
-      onNotice(updated.sandbox_status === "RUNNING" ? "Sandbox started." : "Sandbox destroyed.")
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projects }),
         queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projectTasks(updated.id) }),
         queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projectFiles(updated.id) }),
       ])
     },
-    onError: handleMutationError,
   })
 
-  const setupRetryMutation = useMutation({
-    mutationFn: retryProjectSetup,
+  const provisioningRetryMutation = useMutation({
+    mutationFn: retryProjectProvisioning,
     onSuccess: async (updated) => {
-      onNotice("Project setup retry started.")
       await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projects })
       await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projectFiles(updated.id) })
     },
-    onError: handleMutationError,
   })
 
-  const switchSandboxMutation = useMutation({
-    mutationFn: switchProjectToNodeSandbox,
+  const projectContextMutation = useMutation({
+    mutationFn: ({ projectId, context }: { projectId: string; context: string }) =>
+      updateProjectContext(projectId, context),
     onSuccess: async (updated) => {
-      onNotice("Created a fresh Node.js sandbox. Preparing the repository again.")
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projects }),
-        queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projectFiles(updated.id) }),
-      ])
+      await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projects })
+      await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projectTasks(updated.id) })
     },
-    onError: handleMutationError,
+  })
+
+  const projectGithubTokenMutation = useMutation({
+    mutationFn: ({ projectId, githubToken }: { projectId: string; githubToken: string }) =>
+      updateProjectGithubToken(projectId, githubToken),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projects })
+    },
   })
 
   const taskActionMutation = useMutation({
     mutationFn: ({
       taskId,
       action,
+      continuation,
     }: {
       projectId: string
       taskId: string
       action: "cancel" | "resume"
-    }) => (action === "cancel" ? cancelTask(taskId) : resumeTask(taskId)),
+      continuation?: string
+    }) => (action === "cancel" ? cancelTask(taskId) : resumeTask(taskId, continuation ?? "")),
     onSuccess: async (_result, variables) => {
-      onNotice(variables.action === "cancel" ? "Cancellation requested." : "Task resumed.")
       await queryClient.invalidateQueries({
         queryKey: dashboardQueryKeys.projectTasks(variables.projectId),
       })
     },
-    onError: handleMutationError,
   })
 
   const replyMutation = useMutation({
     mutationFn: ({ taskId, reply }: { taskId: string; reply: string }) => replyToTask(taskId, reply),
-    onSuccess: () => onNotice("Reply sent."),
-    onError: handleMutationError,
   })
 
   const settingsMutation = useMutation({
     mutationFn: (values: Record<string, string>) => updateSettings(values),
     onSuccess: async () => {
-      onNotice("Settings saved.")
       await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.settings })
     },
-    onError: handleMutationError,
   })
 
   return {
     createProject: createProjectMutation,
     createTask: createTaskMutation,
     sandbox: sandboxMutation,
-    setupRetry: setupRetryMutation,
-    switchSandbox: switchSandboxMutation,
+    provisioningRetry: provisioningRetryMutation,
+    projectContext: projectContextMutation,
+    projectGithubToken: projectGithubTokenMutation,
     taskAction: taskActionMutation,
     reply: replyMutation,
     saveSettings: settingsMutation,

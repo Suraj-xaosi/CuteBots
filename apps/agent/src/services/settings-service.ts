@@ -1,17 +1,20 @@
 import { ErrorCode, type Result } from "@workspace/types";
-import { PrismaClient, SecretVault } from "@workspace/db";
+import { PrismaClient } from "@workspace/db";
 import { z } from "zod";
+import { SecretVault } from "../security/secret-vault.js";
 
 const settingNames = [
   "LLM_PROVIDER",
   "LLM_MODEL",
   "LLM_API_KEY",
+  "TAVILY_API_KEY",
 ] as const;
 
 export type SettingName = typeof settingNames[number];
 
 const secretNames = new Set<SettingName>([
   "LLM_API_KEY",
+  "TAVILY_API_KEY",
 ]);
 
 const settingsInputSchema = z.record(z.string(), z.string().max(4_000));
@@ -136,5 +139,6 @@ function validateSetting(name: string, value: string): Result<void> {
 
 function environmentValue(name: SettingName): string | undefined {
   if (name === "LLM_API_KEY") return process.env.LLM_API_KEY ?? process.env.API_KEY;
+  if (name === "TAVILY_API_KEY") return process.env.TAVILY_API_KEY;
   return process.env[name];
 }

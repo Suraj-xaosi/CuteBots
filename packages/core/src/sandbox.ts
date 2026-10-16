@@ -6,18 +6,13 @@ import { COMMAND_FOREGROUND_TIMEOUT_MS, WORKSPACE_ROOT } from "./sandbox/constan
 
 export type { CommandJobSnapshot } from "./sandbox/command-jobs.js";
 
-export type SandboxProfile = "node" | "minimal";
-
 export class Sandbox {
   private containerId: string | null = null;
   private readonly containerName: string;
   private readonly commandJobs: SandboxCommandJobs;
   private readonly fileOperations: SandboxFileOperations;
 
-  constructor(
-    private readonly projectId: string,
-    private readonly profile: SandboxProfile = "node",
-  ) {
+  constructor(private readonly projectId: string) {
     const safeProjectId = projectId.replace(/[^a-zA-Z0-9_.-]/g, "-");
     this.containerName = `sandbox-${safeProjectId}`;
     this.commandJobs = new SandboxCommandJobs(() => this.containerId);
@@ -66,9 +61,11 @@ export class Sandbox {
     ]);
 
     if (inspect.exitCode !== 0) {
+      const error = commandError(inspect);
+      const containerMissing = /no such (?:object|container)|no container with name or id/i.test(error);
       return this.failure(
-        commandError(inspect) || "Container not found",
-        ErrorCode.CONTAINER_NOT_FOUND,
+        error || "Unable to inspect project sandbox",
+        containerMissing ? ErrorCode.CONTAINER_NOT_FOUND : ErrorCode.CONTAINER_EXEC_FAILED,
       );
     }
 
@@ -162,11 +159,6 @@ export class Sandbox {
   }
 
   private imageName(): string {
-    if (this.profile === "node") {
-      return process.env.SANDBOX_NODE_IMAGE ??
-        process.env.SANDBOX_IMAGE ??
-        "cutebots-sandbox-node:latest";
-    }
-    return process.env.SANDBOX_MINIMAL_IMAGE ?? "cutebots-sandbox-minimal:latest";
+    return process.env.SANDBOX_IMAGE ?? "cutebots-sandbox-minimal:latest";
   }
 }

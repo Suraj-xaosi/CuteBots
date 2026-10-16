@@ -14,6 +14,7 @@
   "dependencies": {
     "@workspace/core": "*",
     "@workspace/db": "*",
+    "@workspace/types": "*",
     "dotenv": "^18.0.4",
     "express": "^5.1.0"
   },

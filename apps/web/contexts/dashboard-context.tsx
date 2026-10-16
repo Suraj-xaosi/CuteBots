@@ -9,19 +9,15 @@ export interface DashboardWorkspaceState {
   projects: ProjectSummary[]
   project: ProjectSummary | null
   onSelectProject: (projectId: string) => void
+  onOpenProjectSettings: (projectId: string) => void
   onNewProject: () => void
   onOpenSettings: () => void
   onSandboxToggle: () => void
   sandboxPending: boolean
-  onRetrySetup: () => void
-  setupRetryPending: boolean
-  onSwitchToNodeSandbox: () => void
-  switchSandboxPending: boolean
-}
-
-export interface DashboardNoticeState {
-  notice: string
-  onDismissNotice: () => void
+  sandboxError: string | null
+  onRetryProvisioning: () => void
+  provisioningRetryPending: boolean
+  provisioningRetryError: string | null
 }
 
 export interface DashboardTasksState {
@@ -30,13 +26,15 @@ export interface DashboardTasksState {
   selectedTaskId: string | null
   onSelectTask: (taskId: string) => void
   stream: ReturnType<typeof useTaskStream>
-  tokenCount: number
   onCreateTask: (description: string, onSuccess: () => void) => void
-  onTaskAction: (action: "cancel" | "resume") => void
+  onTaskAction: (action: "cancel" | "resume", continuation?: string, onSuccess?: () => void) => void
   onReply: (reply: string, onSuccess: () => void) => void
   taskPending: boolean
+  taskError: string | null
   taskActionPending: boolean
+  taskActionError: string | null
   replyPending: boolean
+  replyError: string | null
 }
 
 export interface DashboardFilesState {
@@ -51,10 +49,19 @@ export interface DashboardFilesState {
 }
 
 export interface DashboardDialogsState {
+  projectSettings: ProjectSummary | null
+  onCloseProjectSettings: () => void
+  onSaveProjectContext: (projectId: string, context: string, onSuccess: () => void) => void
+  contextSavePending: boolean
+  contextSaveError: string | null
+  onSaveGithubToken: (projectId: string, token: string, onSuccess: () => void) => void
+  githubTokenSavePending: boolean
+  githubTokenSaveError: string | null
   showProjectForm: boolean
   onCloseProjectForm: () => void
   onCreateProject: (input: CreateProjectInput) => void
   projectPending: boolean
+  projectError: string | null
   showSettings: boolean
   onCloseSettings: () => void
   settings: PublicSettings | undefined
@@ -63,16 +70,15 @@ export interface DashboardDialogsState {
   onRetrySettings: () => void
   onSaveSettings: (values: Record<string, string>, onSuccess: () => void) => void
   settingsPending: boolean
+  settingsSaveError: string | null
 }
 
 const DashboardWorkspaceContext = createContext<DashboardWorkspaceState | null>(null)
-const DashboardNoticeContext = createContext<DashboardNoticeState | null>(null)
 const DashboardTasksContext = createContext<DashboardTasksState | null>(null)
 const DashboardFilesContext = createContext<DashboardFilesState | null>(null)
 const DashboardDialogsContext = createContext<DashboardDialogsState | null>(null)
 
 export const DashboardWorkspaceProvider = DashboardWorkspaceContext.Provider
-export const DashboardNoticeProvider = DashboardNoticeContext.Provider
 export const DashboardTasksProvider = DashboardTasksContext.Provider
 export const DashboardFilesProvider = DashboardFilesContext.Provider
 export const DashboardDialogsProvider = DashboardDialogsContext.Provider
@@ -84,10 +90,6 @@ function useRequiredContext<T>(context: T | null, name: string): T {
 
 export function useDashboardWorkspace() {
   return useRequiredContext(useContext(DashboardWorkspaceContext), "useDashboardWorkspace")
-}
-
-export function useDashboardNotice() {
-  return useRequiredContext(useContext(DashboardNoticeContext), "useDashboardNotice")
 }
 
 export function useDashboardTasks() {

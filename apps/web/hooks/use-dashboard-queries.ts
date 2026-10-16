@@ -8,7 +8,6 @@ import {
   fetchProjectTasks,
   fetchProjects,
   fetchSettings,
-  fetchTaskUsage,
 } from "@/lib/agent-api"
 import {
   activeTaskStatuses,
@@ -23,7 +22,6 @@ export const dashboardQueryKeys = {
   fileContent: (projectId: string | null, filePath: string | null) =>
     ["file-content", projectId, filePath] as const,
   settings: ["settings"] as const,
-  taskUsage: (taskId: string | null) => ["task-usage", taskId] as const,
 }
 
 export function useProjectsQuery() {
@@ -31,7 +29,7 @@ export function useProjectsQuery() {
     queryKey: dashboardQueryKeys.projects,
     queryFn: fetchProjects,
     refetchInterval: (query) =>
-      query.state.data?.some((project) => project.setup_status === "PROVISIONING")
+      query.state.data?.some((project) => project.provision_status === "PROVISIONING")
         ? 1_500
         : false,
   })
@@ -52,13 +50,13 @@ export function useProjectTasksQuery(projectId: string | null) {
 export function useProjectFilesQuery(
   projectId: string | null,
   sandboxRunning: boolean,
-  setupReady: boolean,
+  provisionReady: boolean,
   hasActiveTasks: boolean,
 ) {
   return useQuery({
     queryKey: dashboardQueryKeys.projectFiles(projectId),
     queryFn: () => fetchProjectFiles(requireDashboardValue(projectId, "Project")),
-    enabled: Boolean(projectId && sandboxRunning && setupReady),
+    enabled: Boolean(projectId && sandboxRunning && provisionReady),
     refetchInterval: hasActiveTasks ? dashboardRefreshIntervals.activeTaskFiles : false,
   })
 }
@@ -66,7 +64,7 @@ export function useProjectFilesQuery(
 export function useFileContentQuery(
   projectId: string | null,
   filePath: string | null,
-  setupReady: boolean,
+  provisionReady: boolean,
   hasActiveTasks: boolean,
 ) {
   return useQuery({
@@ -76,7 +74,7 @@ export function useFileContentQuery(
         requireDashboardValue(projectId, "Project"),
         requireDashboardValue(filePath, "File path"),
       ),
-    enabled: Boolean(projectId && filePath && setupReady),
+    enabled: Boolean(projectId && filePath && provisionReady),
     refetchInterval: hasActiveTasks ? dashboardRefreshIntervals.activeTasks : false,
   })
 }
@@ -87,14 +85,5 @@ export function useSettingsQuery(enabled: boolean) {
     queryFn: fetchSettings,
     enabled,
     refetchInterval: enabled ? dashboardRefreshIntervals.openSettings : false,
-  })
-}
-
-export function useTaskUsageQuery(taskId: string | null, isActive: boolean) {
-  return useQuery({
-    queryKey: dashboardQueryKeys.taskUsage(taskId),
-    queryFn: () => fetchTaskUsage(requireDashboardValue(taskId, "Task")),
-    enabled: Boolean(taskId),
-    refetchInterval: isActive ? dashboardRefreshIntervals.activeTaskUsage : false,
   })
 }
