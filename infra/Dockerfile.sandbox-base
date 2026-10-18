@@ -1,0 +1,15 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl bash sudo ca-certificates coreutils findutils util-linux \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --uid 1000 sandbox \
+    && echo "sandbox ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
+    && mkdir -p /workspace \
+    && chown sandbox:sandbox /workspace
+
+WORKDIR /workspace
+USER sandbox
+CMD ["sleep", "infinity"]
