@@ -16,57 +16,74 @@ model Project {
   context          String                 @default("")
   github_token     String?                @map("clone_credential")
   container_id     String?
-  active_task_id   String?
+  active_run_id    String?                @unique
+  active_run       AgentRun?              @relation("ProjectActiveRun", fields: [active_run_id], references: [id], onDelete: SetNull)
   branch_name      String?
   sandbox_status   SandboxStatus          @default(STOPPED)
   provision_status ProjectProvisionStatus @default(PENDING)
   provision_error  String?
   created_at       DateTime               @default(now())
   updated_at       DateTime               @updatedAt
-  tasks            Task[]
+  conversations    Conversation[]
 }
 
-model Task {
-  id                 String     @id @default(cuid())
-  project_id         String
-  project            Project    @relation(fields: [project_id], references: [id], onDelete: Cascade)
-  description        String
-  status             TaskStatus @default(RUNNING)
+model Conversation {
+  id         String      @id @default(cuid())
+  project_id String
+  project    Project     @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  title      String?
+  created_at DateTime    @default(now())
+  updated_at DateTime    @updatedAt
+  messages   Message[]
+  runs       AgentRun[]
+
+  @@index([project_id, created_at])
+}
+
+model AgentRun {
+  id                 String         @id @default(cuid())
+  conversation_id    String
+  conversation       Conversation   @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  active_for_project Project?       @relation("ProjectActiveRun")
+  status             AgentRunStatus @default(QUEUED)
   completion_summary String?
   fail_reason        String?
-  created_at         DateTime   @default(now())
-  updated_at         DateTime   @updatedAt
-  started_at         DateTime   @default(now())
+  created_at         DateTime       @default(now())
+  updated_at         DateTime       @updatedAt
+  started_at         DateTime?
   completed_at       DateTime?
   messages           Message[]
   logs               AgentLog[]
 
-  @@index([project_id, created_at])
+  @@index([conversation_id, created_at])
   @@index([status])
 }
 
 model Message {
-  id           String      @id @default(cuid())
-  task_id      String
-  task         Task        @relation(fields: [task_id], references: [id], onDelete: Cascade)
-  role         MessageRole
-  content      String
-  tool_calls   String?
-  tool_call_id String?
-  created_at   DateTime    @default(now())
+  id              String       @id @default(cuid())
+  conversation_id String
+  conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  run_id          String?
+  run             AgentRun?    @relation(fields: [run_id], references: [id], onDelete: SetNull)
+  role            MessageRole
+  content         String
+  tool_calls      String?
+  tool_call_id    String?
+  created_at      DateTime     @default(now())
 
-  @@index([task_id, created_at])
+  @@index([conversation_id, created_at])
+  @@index([run_id, created_at])
 }
 
 model AgentLog {
   id         Int      @id @default(autoincrement())
-  task_id    String
-  task       Task     @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  run_id     String
+  run        AgentRun @relation(fields: [run_id], references: [id], onDelete: Cascade)
   type       String
   content    String
   created_at DateTime @default(now())
 
-  @@index([task_id, id])
+  @@index([run_id, id])
 }
 
 model Setting {
@@ -83,8 +100,10 @@ enum ProjectProvisionStatus {
   FAILED
 }
 
-enum TaskStatus {
+enum AgentRunStatus {
+  QUEUED
   RUNNING
+  WAITING_FOR_INPUT
   INTERRUPTED
   AWAITING_APPROVAL
   DONE
@@ -92,8 +111,10 @@ enum TaskStatus {
 }
 
 enum SandboxStatus {
+  STARTING
   RUNNING
   STOPPED
+  DESTROYING
 }
 
 enum MessageRole {
