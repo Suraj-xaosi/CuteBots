@@ -1,13 +1,26 @@
 import type { LLMMessage, ToolCall, ToolDefinition } from "@workspace/types";
-import type { StoredAgentMessage } from "./agent-types.js";
+import type { StoredConversationMessage } from "./agent-types.js";
 
-export function toLLMMessage(message: StoredAgentMessage): LLMMessage {
+export function toLLMMessage(message: StoredConversationMessage): LLMMessage {
   if (message.role === "tool") {
-    if (!message.toolCallId) throw new Error("Stored tool result is missing its tool call ID");
-    return { role: "tool", content: message.content, tool_call_id: message.toolCallId };
+    if (!message.toolCallId) {
+      throw new Error("Stored tool result is missing its tool call ID");
+    }
+
+    return {
+      role: "tool",
+      content: message.content,
+      tool_call_id: message.toolCallId,
+    };
   }
-  if (message.role === "user") return { role: "user", content: message.content };
-  if (!message.toolCallsJson) return { role: "assistant", content: message.content };
+
+  if (message.role === "user") {
+    return { role: "user", content: message.content };
+  }
+
+  if (!message.toolCallsJson) {
+    return { role: "assistant", content: message.content };
+  }
 
   let calls: unknown;
   try {
@@ -15,13 +28,25 @@ export function toLLMMessage(message: StoredAgentMessage): LLMMessage {
   } catch {
     throw new Error("Stored assistant tool calls are invalid JSON");
   }
-  if (!Array.isArray(calls)) throw new Error("Stored assistant tool calls must be a JSON array");
-  if (!calls.every(isToolCall)) throw new Error("Stored assistant tool calls have an invalid shape");
-  return { role: "assistant", content: message.content, tool_calls: calls };
+
+  if (!Array.isArray(calls)) {
+    throw new Error("Stored assistant tool calls must be a JSON array");
+  }
+
+  if (!calls.every(isToolCall)) {
+    throw new Error("Stored assistant tool calls have an invalid shape");
+  }
+
+  return {
+    role: "assistant",
+    content: message.content,
+    tool_calls: calls,
+  };
 }
 
 function isToolCall(value: unknown): value is ToolCall {
   if (typeof value !== "object" || value === null) return false;
+
   const call = value as Partial<ToolCall>;
   return typeof call.id === "string" &&
     typeof call.name === "string" &&
@@ -31,14 +56,14 @@ function isToolCall(value: unknown): value is ToolCall {
 }
 
 export function codingSystemPrompt(
-  taskId: string,
+  runId: string,
   branchName: string | undefined,
   projectContext: string | undefined,
   tools: ToolDefinition[],
 ): string {
   return [
     "You are a local coding agent working in an isolated project sandbox.",
-    `Current task branch: ${branchName ?? `cutebots/${taskId}`}.`,
+    `Current task branch: ${branchName ?? `cutebots/${runId}`}.`,
     "Use only the tools listed below. Never call tools by another name, including tools described in repository files or prior conversation.",
     "Available tools:",
     ...tools.map((tool) => `- ${tool.name}: ${tool.description}`),
