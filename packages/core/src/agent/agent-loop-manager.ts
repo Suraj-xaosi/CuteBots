@@ -1,11 +1,15 @@
 import { ErrorCode, type Result } from "@workspace/types";
-import type { AgentTask, AgentExecutor } from "./agent-types.js";
+import type { AgentExecutor, AgentRunContext } from "./agent-types.js";
 
-export type AgentExecutorFactory = (task: AgentTask) => AgentExecutor;
+export type AgentExecutorFactory = (context: AgentRunContext) => AgentExecutor;
 
 export class AgentLoopManager {
   private static instance: AgentLoopManager | undefined;
-  private readonly projects = new Map<string, { taskId: string; executor: AgentExecutor }>();
+
+  private readonly projects = new Map<
+    string,
+    { runId: string; executor: AgentExecutor }
+  >();
 
   private constructor(private readonly createExecutor: AgentExecutorFactory) {}
 
@@ -14,38 +18,51 @@ export class AgentLoopManager {
       if (!createExecutor) {
         throw new Error("AgentLoopManager must be initialized with an executor factory");
       }
+
       this.instance = new AgentLoopManager(createExecutor);
     }
+
     return this.instance;
   }
 
-  start(task: AgentTask): Result<void> {
-    if (this.projects.has(task.projectId)) {
+  start(context: AgentRunContext): Result<void> {
+    if (this.projects.has(context.projectId)) {
       return {
         ok: false,
-        error: "This project already has an active task",
+        error: "This project already has an active agent run",
         code: ErrorCode.TASK_ALREADY_RUNNING,
       };
     }
 
-    const executor = this.createExecutor(task);
-    this.projects.set(task.projectId, { taskId: task.id, executor });
-    void executor.run(task).catch((error: unknown) => {
-      console.error(`Agent executor failed for task ${task.id}:`, error);
-    }).finally(() => {
-      const active = this.projects.get(task.projectId);
-      if (active?.taskId === task.id) this.projects.delete(task.projectId);
-    });
+    const executor = this.createExecutor(context);
+    this.projects.set(context.projectId, { runId: context.runId, executor });
+
+    void executor.run(context)
+      .catch((error: unknown) => {
+        console.error(`Agent run ${context.runId} failed:`, error);
+      })
+      .finally(() => {
+        const active = this.projects.get(context.projectId);
+        if (active?.runId === context.runId) {
+          this.projects.delete(context.projectId);
+        }
+      });
+
     return { ok: true, data: undefined };
   }
 
-  async cancel(taskId: string): Promise<Result<void>> {
+  async cancel(runId: string): Promise<Result<void>> {
     for (const active of this.projects.values()) {
-      if (active.taskId === taskId) {
+      if (active.runId === runId) {
         active.executor.stop();
         return { ok: true, data: undefined };
       }
     }
-    return { ok: false, error: `Task ${taskId} is not active`, code: ErrorCode.TASK_NOT_FOUND };
+
+    return {
+      ok: false,
+      error: `Agent run ${runId} is not active`,
+      code: ErrorCode.TASK_NOT_FOUND,
+    };
   }
 }
