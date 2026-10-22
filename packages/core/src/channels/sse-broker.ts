@@ -1,5 +1,8 @@
 import { ErrorCode, type Result } from "@workspace/types";
-import type { AgentLogEvent, AgentPersistence } from "../agent/agent-types.js";
+import type {
+  AgentRunLogEvent,
+  AgentRunPersistence,
+} from "../agent/agent-types.js";
 
 const REPLAY_PAGE_SIZE = 200;
 
@@ -14,17 +17,25 @@ interface Subscriber {
   client: SSEClient;
   lastSentId: number;
   replaying: boolean;
-  buffered: AgentLogEvent[];
+  buffered: AgentRunLogEvent[];
   closed: boolean;
 }
 
 export class SSEBroker {
   private readonly subscribers = new Map<string, Set<Subscriber>>();
 
-  constructor(private readonly persistence: Pick<AgentPersistence, "listLogsAfter">) {}
+  constructor(
+    private readonly persistence: Pick<AgentRunPersistence, "listRunLogsAfter">,
+  ) {}
 
-  async subscribe(taskId: string, client: SSEClient, afterId = 0): Promise<void> {
-    if (!Number.isSafeInteger(afterId) || afterId < 0 || client.writableEnded) return;
+  async subscribe(
+    runId: string,
+    client: SSEClient,
+    afterId = 0,
+  ): Promise<void> {
+    if (!Number.isSafeInteger(afterId) || afterId < 0 || client.writableEnded) {
+      return;
+    }
 
     const subscriber: Subscriber = {
       client,
@@ -33,32 +44,41 @@ export class SSEBroker {
       buffered: [],
       closed: false,
     };
-    const taskSubscribers = this.subscribers.get(taskId) ?? new Set<Subscriber>();
-    taskSubscribers.add(subscriber);
-    this.subscribers.set(taskId, taskSubscribers);
+    const runSubscribers = this.subscribers.get(runId) ?? new Set<Subscriber>();
+    runSubscribers.add(subscriber);
+    this.subscribers.set(runId, runSubscribers);
 
     const unsubscribe = () => {
       subscriber.closed = true;
-      taskSubscribers.delete(subscriber);
-      if (taskSubscribers.size === 0) this.subscribers.delete(taskId);
+      runSubscribers.delete(subscriber);
+      if (runSubscribers.size === 0) this.subscribers.delete(runId);
     };
     client.on("close", unsubscribe);
 
     let cursor = afterId;
     try {
       while (!isClosed(subscriber)) {
-        const page = await this.persistence.listLogsAfter(taskId, cursor, REPLAY_PAGE_SIZE);
+        const page = await this.persistence.listRunLogsAfter(
+          runId,
+          cursor,
+          REPLAY_PAGE_SIZE,
+        );
+
         if (!page.ok) {
-          client.write(`event: stream_error\ndata: ${JSON.stringify({ error: page.error })}\n\n`);
+          client.write(
+            `event: stream_error\ndata: ${JSON.stringify({ error: page.error })}\n\n`,
+          );
           unsubscribe();
           return;
         }
+
         const events = page.data.slice().sort((left, right) => left.id - right.id);
         for (const event of events) {
           this.send(subscriber, event);
           cursor = Math.max(cursor, event.id);
           if (isClosed(subscriber)) break;
         }
+
         if (events.length < REPLAY_PAGE_SIZE) break;
       }
 
@@ -70,16 +90,21 @@ export class SSEBroker {
     } catch (error) {
       unsubscribe();
       if (!isClosed(subscriber)) {
-        client.write(`event: stream_error\ndata: ${JSON.stringify({
-          error: error instanceof Error ? error.message : "Unable to replay task logs",
-        })}\n\n`);
+        client.write(
+          `event: stream_error\ndata: ${JSON.stringify({
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unable to replay run logs",
+          })}\n\n`,
+        );
       }
     }
   }
 
   async subscribeEvents(
-    taskId: string,
-    onEvent: (event: AgentLogEvent) => void,
+    runId: string,
+    onEvent: (event: AgentRunLogEvent) => void,
     afterId = 0,
     onError: (error: string) => void = () => {},
   ): Promise<() => void> {
@@ -96,21 +121,25 @@ export class SSEBroker {
         const eventName = chunk.match(/^event: ([^\r\n]+)/m)?.[1];
         const data = chunk.match(/^data: (.+)$/m)?.[1];
         if (!data) return false;
+
         let payload: unknown;
         try {
           payload = JSON.parse(data) as unknown;
         } catch {
-          onError("Task stream returned invalid event data");
+          onError("Run stream returned invalid event data");
           return false;
         }
+
         if (eventName === "stream_error") {
-          const message = isRecord(payload) && typeof payload.error === "string"
-            ? payload.error
-            : "Task stream failed";
+          const message =
+            isRecord(payload) && typeof payload.error === "string"
+              ? payload.error
+              : "Run stream failed";
           onError(message);
           return false;
         }
-        if (isAgentLogEvent(payload, taskId)) onEvent(payload);
+
+        if (isAgentRunLogEvent(payload, runId)) onEvent(payload);
         return true;
       },
       on(_event, listener) {
@@ -118,7 +147,7 @@ export class SSEBroker {
       },
     };
 
-    await this.subscribe(taskId, client, afterId);
+    await this.subscribe(runId, client, afterId);
     return () => {
       if (closed) return;
       closed = true;
@@ -126,9 +155,10 @@ export class SSEBroker {
     };
   }
 
-  publish(event: AgentLogEvent): void {
-    const subscribers = this.subscribers.get(event.taskId);
+  publish(event: AgentRunLogEvent): void {
+    const subscribers = this.subscribers.get(event.runId);
     if (!subscribers) return;
+
     for (const subscriber of subscribers) {
       if (subscriber.replaying) {
         subscriber.buffered.push(event);
@@ -138,19 +168,26 @@ export class SSEBroker {
     }
   }
 
-  private send(subscriber: Subscriber, event: AgentLogEvent) {
+  private send(subscriber: Subscriber, event: AgentRunLogEvent): void {
     if (isClosed(subscriber) || event.id <= subscriber.lastSentId) return;
-    subscriber.client.write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`);
+    subscriber.client.write(
+      `id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`,
+    );
     subscriber.lastSentId = event.id;
   }
 }
 
-function isAgentLogEvent(value: unknown, taskId: string): value is AgentLogEvent {
-  return isRecord(value)
-    && value.taskId === taskId
-    && Number.isSafeInteger(value.id)
-    && typeof value.type === "string"
-    && typeof value.content === "string";
+function isAgentRunLogEvent(
+  value: unknown,
+  runId: string,
+): value is AgentRunLogEvent {
+  return (
+    isRecord(value) &&
+    value.runId === runId &&
+    Number.isSafeInteger(value.id) &&
+    typeof value.type === "string" &&
+    typeof value.content === "string"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -159,16 +196,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function parseLastEventId(value: string | undefined): Result<number> {
   if (value === undefined || value === "") return { ok: true, data: 0 };
+
   if (!/^\d+$/.test(value)) {
-    return { ok: false, error: "Last-Event-ID must be a non-negative integer", code: ErrorCode.TOOL_EXECUTION_FAILED };
+    return {
+      ok: false,
+      error: "Last-Event-ID must be a non-negative integer",
+      code: ErrorCode.TOOL_EXECUTION_FAILED,
+    };
   }
+
   const id = Number(value);
   if (!Number.isSafeInteger(id)) {
-    return { ok: false, error: "Last-Event-ID is outside the supported range", code: ErrorCode.TOOL_EXECUTION_FAILED };
+    return {
+      ok: false,
+      error: "Last-Event-ID is outside the supported range",
+      code: ErrorCode.TOOL_EXECUTION_FAILED,
+    };
   }
+
   return { ok: true, data: id };
 }
 
-function isClosed(subscriber: Subscriber) {
-  return subscriber.closed || subscriber.client.writableEnded || subscriber.client.destroyed === true;
+function isClosed(subscriber: Subscriber): boolean {
+  return (
+    subscriber.closed ||
+    subscriber.client.writableEnded ||
+    subscriber.client.destroyed === true
+  );
 }

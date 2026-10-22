@@ -5,6 +5,16 @@ export enum TaskStatus {
   FAILED = "FAILED",
 }
 
+export enum AgentRunStatus{
+  QUEUED="QUEUED",
+  RUNNING="RUNNING",
+  WAITING_FOR_INPUT="WAITING_FOR_INPUT",
+  INTERRUPTED="INTERRUPTED",
+  AWAITING_APPROVAL="AWAITING_APPROVAL",
+  DONE="DONE",
+  FAILED="FAILED"
+}
+
 export enum SandboxStatus {
   RUNNING = "RUNNING",
   STOPPED = "STOPPED",
