@@ -1,16 +1,7 @@
-import { Geist, Geist_Mono } from "next/font/google"
-
-import "@workspace/ui/globals.css"
-import { ThemeProvider } from "@/components/theme-provider"
-import { QueryProvider } from "@/components/query-provider"
-import { cn } from "@workspace/ui/lib/utils"
-
-const geist = Geist({ subsets: ["latin"], variable: "--font-sans" })
-
-const fontMono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-})
+export const metadata = {
+  title: "CuteBots",
+  description: "Local coding-agent workspace",
+}
 
 export default function RootLayout({
   children,
@@ -18,16 +9,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html
-      lang="en"
-      suppressHydrationWarning
-      className={cn("antialiased", fontMono.variable, "font-sans", geist.variable)}
-    >
-      <body className="bg-slate-100 text-slate-900">
-        <QueryProvider>
-          <ThemeProvider>{children}</ThemeProvider>
-        </QueryProvider>
-      </body>
+    <html lang="en">
+      <body>{children}</body>
     </html>
   )
 }

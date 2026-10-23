@@ -4,7 +4,7 @@ CuteBots is being migrated to a conversation/run architecture with a self-hosted
 
 ## Project structure
 
-- `apps/web`: Next.js dashboard and the future home for API route handlers under `app/api/`
+- `apps/web`: Next.js scaffold with a minimal blank page; the frontend is being rebuilt, and API route handlers belong under `app/api/`
 - `packages/core`: LangGraph agent loop, LangChain model integrations, AI SDK streaming adapter, command/file/search tools grouped by purpose, optional Tavily web search, Docker controls
 - `packages/db`: SQLite/Prisma schema, migrations, and persistence
 - `packages/types`: shared application and model types
