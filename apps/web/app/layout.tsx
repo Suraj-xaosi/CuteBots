@@ -1,3 +1,5 @@
+import "@workspace/ui/globals.css"
+
 export const metadata = {
   title: "CuteBots",
   description: "Local coding-agent workspace",
