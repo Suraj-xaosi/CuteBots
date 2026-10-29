@@ -140,3 +140,68 @@ for attempt in $(seq 1 50); do
 done
 kill -KILL -- "-$command_process_id" 2>/dev/null || true
 `;
+
+export const COMMAND_JOB_CLEANUP_SCRIPT = `
+set -u
+jobs_directory=/tmp/cutebots-command-jobs
+if [ ! -d "$jobs_directory" ]; then
+  exit 0
+fi
+
+for job_directory in "$jobs_directory"/*; do
+  [ -d "$job_directory" ] || continue
+  [ -f "$job_directory/status" ] || continue
+  [ "$(cat "$job_directory/status")" = running ] || continue
+
+  if [ ! -f "$job_directory/pid" ]; then
+    printf 'Running command job has no process ID: %s\\n' "$job_directory" >&2
+    exit 1
+  fi
+  command_process_id=$(cat "$job_directory/pid")
+  case "$command_process_id" in
+    ''|*[!0-9]*)
+      printf 'Running command job has an invalid process ID: %s\\n' "$job_directory" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$command_process_id" -le 1 ]; then
+    printf 'Running command job has an unsafe process ID: %s\\n' "$job_directory" >&2
+    exit 1
+  fi
+  process_group_id=$(ps -o pgid= -p "$command_process_id" | tr -d ' ')
+  if [ -n "$process_group_id" ] && [ "$process_group_id" != "$command_process_id" ]; then
+    printf 'Running command job process group does not match its process ID: %s\\n' "$job_directory" >&2
+    exit 1
+  fi
+
+  : > "$job_directory/cancel-requested"
+  kill -TERM -- "-$command_process_id" 2>/dev/null || true
+  process_stopped=false
+  for attempt in $(seq 1 50); do
+    if ! kill -0 -- "-$command_process_id" 2>/dev/null; then
+      process_stopped=true
+      break
+    fi
+    sleep 0.1
+  done
+  if [ "$process_stopped" != true ]; then
+    kill -KILL -- "-$command_process_id" 2>/dev/null || true
+    if kill -0 -- "-$command_process_id" 2>/dev/null; then
+      printf 'Unable to stop command process group: %s\\n' "$job_directory" >&2
+      exit 1
+    fi
+  fi
+
+  job_stopped=false
+  for attempt in $(seq 1 50); do
+    if [ "$(cat "$job_directory/status")" != running ]; then
+      job_stopped=true
+      break
+    fi
+    sleep 0.1
+  done
+  if [ "$job_stopped" != true ]; then
+    printf cancelled > "$job_directory/status"
+  fi
+done
+`;

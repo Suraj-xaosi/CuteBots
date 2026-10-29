@@ -19,8 +19,13 @@ export class RunCommandTool extends Tool<typeof commandSchema> {
     args: z.output<typeof commandSchema>,
     sandbox: Sandbox,
     signal?: AbortSignal,
+    runId?: string,
   ): Promise<ToolResult> {
-    const result = await sandbox.runCommand(args.command, { signal });
+    if (!runId) {
+      return { success: false, output: "Command execution requires an agent run ID." };
+    }
+
+    const result = await sandbox.runCommand(args.command, { signal, runId });
     if (!result.ok) return { success: false, output: result.error };
     return commandJobResult(result.data);
   }
@@ -34,8 +39,14 @@ export class PollCommandTool extends Tool<typeof commandJobSchema> {
   protected async executeValidated(
     args: z.output<typeof commandJobSchema>,
     sandbox: Sandbox,
+    _signal?: AbortSignal,
+    runId?: string,
   ): Promise<ToolResult> {
-    const result = await sandbox.pollCommand(args.job_id);
+    if (!runId) {
+      return { success: false, output: "Polling a command requires an agent run ID." };
+    }
+
+    const result = await sandbox.pollCommand(args.job_id, runId);
     if (!result.ok) return { success: false, output: result.error };
     return commandJobResult(result.data);
   }
@@ -49,14 +60,19 @@ export class CancelCommandTool extends Tool<typeof commandJobSchema> {
   protected async executeValidated(
     args: z.output<typeof commandJobSchema>,
     sandbox: Sandbox,
+    _signal?: AbortSignal,
+    runId?: string,
   ): Promise<ToolResult> {
-    const result = await sandbox.cancelCommand(args.job_id);
+    if (!runId) {
+      return { success: false, output: "Cancelling a command requires an agent run ID." };
+    }
+
+    const result = await sandbox.cancelCommand(args.job_id, runId);
     return result.ok
       ? { success: true, output: `Cancellation requested for job ${args.job_id}` }
       : { success: false, output: result.error };
   }
 }
-
 function commandJobResult(snapshot: CommandJobSnapshot) {
   const lines = [snapshot.output.trimEnd()];
   if (snapshot.status === "running") {

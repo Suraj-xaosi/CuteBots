@@ -1,45 +1,59 @@
 # CuteBots
 
-CuteBots is being migrated to a conversation/run architecture with a self-hosted Next.js app. The legacy Express backend has been removed; the Next.js API handlers and backend services are intentionally left for a clean-slate implementation.
+CuteBots is a self-hosted Next.js coding-agent workspace. Server Actions handle project, credential, conversation, run, and sandbox operations; the run activity stream uses an App Router Route Handler.
 
 ## Project structure
 
-- `apps/web`: Next.js scaffold with a minimal blank page; the frontend is being rebuilt, and API route handlers belong under `app/api/`
+- `apps/web`: Next.js app, project/conversation context, Server Actions, encrypted project credentials, and the run activity stream
 - `packages/core`: LangGraph agent loop, LangChain model integrations, AI SDK streaming adapter, command/file/search tools grouped by purpose, optional Tavily web search, Docker controls
 - `packages/db`: SQLite/Prisma schema, migrations, and persistence
 - `packages/types`: shared application and model types
 - `infra/Dockerfile.sandbox-base`: common sandbox base; language runtimes are installed later as needed
-
-The dashboard still expects API endpoints that have not yet been reimplemented. The API client calls same-origin `/api/*` URLs, and Next.js can serve these through App Router route handlers without a proxy to a separate server.
 
 ## Follow the code
 
 If you are new to the codebase, follow one feature at a time instead of reading every file:
 
 1. **Dashboard:** start at `apps/web/app/page.tsx`, then follow the component it renders in `apps/web/components/`.
-2. **Browser requests:** `apps/web/lib/agent-api.ts` sends same-origin requests to `/api/*`.
-3. **Next.js API routes:** add App Router handlers under `apps/web/app/api/` when implementing the new backend.
+2. **Browser requests:** use Server Actions for ordinary database changes and forms.
+3. **Live updates:** the run activity stream is served from `apps/web/app/api/runs/[runId]/events/route.ts`.
 4. **Agent work:** `packages/core/src/agent/agent-loop.ts` contains the agent loop and `packages/core/src/tools/` contains its tools.
 5. **Tools and sandbox:** `packages/core/src/sandbox.ts` connects core tools to Docker.
-6. **Saved data:** `packages/db/prisma/schema.prisma` describes the database schema; persistence wiring belongs in the new backend.
+6. **Saved data:** `packages/db/prisma/schema.prisma` describes the database schema; `apps/web/lib/server.ts` connects Prisma persistence to the agent runtime.
 
-For example, to follow a dashboard request, start at the relevant component, then `apps/web/lib/agent-api.ts`, and add the matching Next.js route handler under `apps/web/app/api/`.
+For example, project CRUD lives in `apps/web/lib/actions/projects.ts`; run activity is the only browser-facing Route Handler.
 
 ### A few patterns you will see
 
 - `Result<T>` means an operation either worked (`ok: true`, with `data`) or failed (`ok: false`, with an error). Check `ok` before using `data`.
-- Next.js route handlers should validate incoming data before passing it to functional service modules.
+- Server Actions should validate input and return safe, serializable results.
 - Keep application decisions in functional service modules, persistence in Prisma-facing modules, and agent execution in core.
 - The TypeScript types at these boundaries describe what each part sends to the next. Start from the function call you are following, and look up a type only when you need to know what data it carries.
 
 ## Run locally
 
-Requirements: Node.js 22+, npm, Docker, and a configured model provider.
+Requirements: Node.js 22+, npm, Docker, and a configured 32-byte base64 credential-encryption key. Enter AI provider keys in each project's settings; provider keys are encrypted in the database and are not read from environment variables.
 
 ```powershell
 npm install
-Copy-Item .env.example .env
 ```
+
+Create a root `.env` with `DATABASE_URL=file:../../data/database.db` and a `CREDENTIALS_ENCRYPTION_KEY` before saving project credentials. Generate a key with:
+
+```powershell
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+```
+
+Keep this key private and stable; changing it makes saved project credentials unreadable.
+
+Apply the SQLite migrations before starting the dashboard:
+
+```powershell
+npm run db:migrate --workspace=@workspace/db
+```
+
+For deployments, apply the checked-in migrations with
+`npm run db:deploy --workspace=@workspace/db`.
 
 Start the Next.js dashboard:
 
@@ -47,4 +61,6 @@ Start the Next.js dashboard:
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Backend endpoints are not available until their Next.js route handlers are implemented.
+Open [http://localhost:3000](http://localhost:3000). Project operations are exposed as Server Actions, and agent activity is streamed over SSE.
+
+The web container needs access to the Docker socket to provision and recover project sandboxes. Existing project containers are started on app startup rather than replaced.

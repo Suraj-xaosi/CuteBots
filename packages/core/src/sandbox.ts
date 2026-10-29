@@ -75,6 +75,10 @@ export class Sandbox {
     }
 
     this.containerId = inspect.stdout.trim();
+    const cleanedJobs = await this.commandJobs.cleanupOrphanedJobs();
+    if (!cleanedJobs.ok) {
+      return this.failure(cleanedJobs.error, cleanedJobs.code);
+    }
     return { ok: true, data: undefined };
   }
 
@@ -100,17 +104,33 @@ export class Sandbox {
 
   async runCommand(
     command: string,
-    options: { foregroundTimeoutMs?: number; pollIntervalMs?: number; signal?: AbortSignal } = {},
+    options: {
+      runId: string;
+      foregroundTimeoutMs?: number;
+      pollIntervalMs?: number;
+      signal?: AbortSignal;
+    },
   ): Promise<Result<CommandJobSnapshot>> {
     return this.commandJobs.runCommand(command, options);
   }
 
-  async pollCommand(jobId: string, offset = 0): Promise<Result<CommandJobSnapshot>> {
-    return this.commandJobs.pollCommand(jobId, offset);
+  async pollCommand(
+    jobId: string,
+    runId: string,
+    offset = 0,
+  ): Promise<Result<CommandJobSnapshot>> {
+    return this.commandJobs.pollCommand(jobId, runId, offset);
   }
 
-  async cancelCommand(jobId: string): Promise<Result<void>> {
-    return this.commandJobs.cancelCommand(jobId);
+  async cancelCommand(
+    jobId: string,
+    runId: string,
+  ): Promise<Result<void>> {
+    return this.commandJobs.cancelCommand(jobId, runId);
+  }
+
+  async cancelRunCommands(runId: string): Promise<Result<void>> {
+    return this.commandJobs.cancelRun(runId);
   }
 
   async writeFile(filePath: string, content: string): Promise<Result<void>> {
@@ -131,6 +151,19 @@ export class Sandbox {
 
   async destroy(): Promise<Result<void>> {
     const result = await runDocker(["rm", "-f", this.containerId ?? this.containerName]);
+    if (
+      result.exitCode !== 0 &&
+      !/no such container|no such object/i.test(`${result.stderr}\n${result.stdout}`)
+    ) {
+      return this.failure(commandError(result), ErrorCode.CONTAINER_EXEC_FAILED);
+    }
+
+    this.containerId = null;
+    return { ok: true, data: undefined };
+  }
+
+  async stop(): Promise<Result<void>> {
+    const result = await runDocker(["stop", this.containerId ?? this.containerName]);
     if (
       result.exitCode !== 0 &&
       !/no such container|no such object/i.test(`${result.stderr}\n${result.stdout}`)

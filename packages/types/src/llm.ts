@@ -37,4 +37,9 @@ export interface LLMProvider {
   name: string;
 }
 
-export type ProviderName = "anthropic" | "openai" | "groq" | "ollama";
+export const PROVIDER_NAMES = ["anthropic", "openai", "groq", "ollama"] as const;
+export type ProviderName = (typeof PROVIDER_NAMES)[number];
+
+export function isProviderName(value: unknown): value is ProviderName {
+  return PROVIDER_NAMES.some((provider) => provider === value);
+}

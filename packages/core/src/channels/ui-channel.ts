@@ -6,13 +6,12 @@ import type {
   AgentRunPersistence,
 } from "../agent/agent-types.js";
 import { HumanReplyInbox } from "./human-reply-inbox.js";
-import { SSEBroker } from "./sse-broker.js";
 
 export class UIChannel implements AgentChannel, HumanInteraction {
   constructor(
     private readonly runId: string,
     private readonly persistence: AgentRunPersistence,
-    private readonly sseBroker: SSEBroker,
+    private readonly publishRunEvent: (event: AgentRunLogEvent) => void,
     private readonly replies: HumanReplyInbox,
   ) {}
 
@@ -24,11 +23,11 @@ export class UIChannel implements AgentChannel, HumanInteraction {
     });
 
     if (!saved.ok) throw new Error(saved.error);
-    this.sseBroker.publish(saved.data);
+    this.publishRunEvent(saved.data);
   }
 
   async sendLog(event: AgentRunLogEvent): Promise<void> {
-    this.sseBroker.publish(event);
+    this.publishRunEvent(event);
   }
 
   waitForReply(timeoutMs: number, signal?: AbortSignal): Promise<Result<string>> {

@@ -12,9 +12,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@next/env": "16.3.8",
     "@ai-sdk/react": "^4.0.147",
     "@tanstack/react-query": "^5.104.0",
     "@tanstack/react-query-devtools": "^5.104.0",
+    "@workspace/core": "*",
+    "@workspace/db": "*",
+    "@workspace/types": "*",
     "@workspace/ui": "*",
     "ai": "^7.0.143",
     "lucide-react": "^1.49.0",

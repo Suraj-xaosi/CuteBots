@@ -55,6 +55,13 @@ export class ContainerManager {
     return result;
   }
 
+  async stop(projectId: string): Promise<Result<void>> {
+    const sandbox = this.sandboxes.get(projectId) ?? new Sandbox(projectId);
+    const result = await sandbox.stop();
+    if (result.ok) this.sandboxes.delete(projectId);
+    return result;
+  }
+
   async recover(projectId: string): Promise<Result<void>> {
     const sandbox = new Sandbox(projectId);
     const result = await sandbox.recover();

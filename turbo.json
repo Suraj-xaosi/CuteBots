@@ -9,7 +9,7 @@
     },
     "lint": {
       "dependsOn": ["^lint"],
-      "env": ["NODE_ENV"]
+      "env": ["NODE_ENV", "CREDENTIALS_ENCRYPTION_KEY", "NEXT_RUNTIME"]
     },
     "format": {
       "dependsOn": ["^format"]
@@ -18,6 +18,8 @@
       "dependsOn": ["^typecheck"]
     },
     "dev": {
+      "dependsOn": ["^build"],
+      "env": ["DATABASE_URL", "CREDENTIALS_ENCRYPTION_KEY"],
       "cache": false,
       "persistent": true
     }

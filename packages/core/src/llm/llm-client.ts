@@ -244,7 +244,7 @@ function defaultBaseUrl(provider: ProviderName) {
   switch (provider) {
     case "openai": return "https://api.openai.com/v1";
     case "groq": return "https://api.groq.com/openai/v1";
-    case "ollama": return process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1";
+    case "ollama": return "http://localhost:11434/v1";
     case "anthropic": return undefined;
   }
 }

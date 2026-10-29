@@ -7,6 +7,7 @@ services:
       - "127.0.0.1:3000:3000"
     volumes:
       - .:/app
+      - /var/run/docker.sock:/var/run/docker.sock
       - node_modules:/app/node_modules
       - web_node_modules:/app/apps/web/node_modules
       - core_node_modules:/app/packages/core/node_modules
@@ -16,6 +17,7 @@ services:
     restart: unless-stopped
     networks:
       - app-net
+      - sandbox-net
 
 networks:
   app-net:

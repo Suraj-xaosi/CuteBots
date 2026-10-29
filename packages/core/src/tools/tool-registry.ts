@@ -57,9 +57,9 @@ export class ToolRegistry {
     return Array.from(this.tools.values(), (tool) => tool.definition);
   }
 
-  async execute(name: string, args: unknown, sandbox: Sandbox, signal?: AbortSignal): Promise<ToolResult> {
+  async execute(name: string, args: unknown, sandbox: Sandbox, signal?: AbortSignal,runId?: string,): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) return { success: false, output: `Unknown tool: ${name}` };
-    return tool.execute(args, sandbox, signal);
+    return tool.execute(args, sandbox, signal, runId);
   }
 }

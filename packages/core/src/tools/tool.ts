@@ -20,14 +20,14 @@ export abstract class Tool<TSchema extends z.ZodType = z.ZodType> {
     };
   }
 
-  async execute(args: unknown, sandbox: Sandbox, signal?: AbortSignal): Promise<ToolResult> {
+  async execute(args: unknown, sandbox: Sandbox, signal?: AbortSignal,runId?:string): Promise<ToolResult> {
     const parsed = this.schema.safeParse(args);
     if (!parsed.success) {
       return { success: false, output: parsed.error.issues.map((issue) => issue.message).join("; ") };
     }
 
     try {
-      return await this.executeValidated(parsed.data, sandbox, signal);
+      return await this.executeValidated(parsed.data, sandbox, signal, runId);
     } catch (error) {
       return {
         success: false,
@@ -40,6 +40,7 @@ export abstract class Tool<TSchema extends z.ZodType = z.ZodType> {
     args: z.output<TSchema>,
     sandbox: Sandbox,
     signal?: AbortSignal,
+    runId?:string
   ): Promise<ToolResult>;
 }
 

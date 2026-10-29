@@ -1,4 +1,12 @@
-import type { AgentRunStatus, LLMMessage, Result } from "@workspace/types";
+import type {
+  AgentRunLogEvent,
+  AgentRunLogType,
+  AgentRunStatus,
+  LLMMessage,
+  Result,
+} from "@workspace/types";
+
+export type { AgentRunLogEvent, AgentRunLogType } from "@workspace/types";
 
 /**
  * Identifies one agent execution and provides the project context it needs.
@@ -37,34 +45,6 @@ export interface StoredConversationMessage {
   toolCallsJson?: string | null;
   /** Associates a tool response with the assistant tool call that requested it. */
   toolCallId?: string | null;
-}
-
-/** Event categories written to a run's activity log and shown by the UI. */
-export type AgentRunLogType =
-  | "thinking"
-  | "assistant_delta"
-  | "tool_call"
-  | "tool_result"
-  | "tool_failure"
-  | "plan"
-  | "evidence"
-  | "warn"
-  | "error"
-  | "status"
-  | "message";
-
-/** A persisted run activity event, returned by persistence and streamed to clients. */
-export interface AgentRunLogEvent {
-  /** Monotonically increasing database ID used for ordering and resuming log streams. */
-  id: number;
-  /** Identifies the run whose activity this event describes. */
-  runId: string;
-  /** Describes the kind of activity, such as a tool call, status update, or error. */
-  type: AgentRunLogType;
-  /** Human-readable event details displayed in the activity timeline. */
-  content: string;
-  /** Time at which the event was persisted. */
-  createdAt: Date;
 }
 
 /**
