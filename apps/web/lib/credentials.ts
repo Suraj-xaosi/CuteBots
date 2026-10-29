@@ -4,7 +4,7 @@ import {prisma} from "@workspace/db"
 
 
 function encryptionKey(){
-    const key= process.env.ECREDENTIALS_ENCRYPTION_KEY
+    const key= process.env.CREDENTIALS_ENCRYPTION_KEY
     const decoded =key? Buffer.from(key,"base64"):Buffer.alloc(0)
     if(!key|| decoded.length!==32){
         throw new Error(
@@ -48,7 +48,7 @@ export function decrypt(text:string){
 
 
 
-async function readProjectCredentials(projectId:string){
+export async function readProjectCredentials(projectId:string){
     const setting=await prisma.setting.findUnique(  {where:{ key:`project:${projectId}:credentials`}   }   )
     if(!setting) return;
 
