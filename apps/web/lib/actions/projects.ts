@@ -7,6 +7,8 @@ import { provisionSandbox } from '../sandbox-service'
 import { actionFailure } from '../action-utils'
 import { sanitizeRepoUrl } from '../safe'
 
+
+
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(100),
   repositoryUrl: z.string().trim().min(1).max(400),
@@ -21,7 +23,9 @@ const updateProjectSchema = z.object({
   context: z.string().trim().max(500).optional(),
 })
 
-export const safeProject = (project: Prisma.ProjectGetPayload<object>): ProjectView => ({
+
+
+const safeProject = (project: Prisma.ProjectGetPayload<object>): ProjectView => ({
   id: project.id,
   name: project.name,
   repositoryUrl: sanitizeRepoUrl(project.repo_url),
@@ -35,36 +39,44 @@ export const safeProject = (project: Prisma.ProjectGetPayload<object>): ProjectV
   updatedAt: project.updated_at,
 })
 
+
+
+
+
 export async function listProjects(): Promise<ActionResult<ProjectListItem[]>> {
   try {
     const projects = await prisma.project.findMany({ orderBy: { updated_at: 'desc' } })
     return { ok: true, data: projects.map((project) => ({ ...safeProject(project), hasCredentials: false })) }
-  } catch (error) {
+  } 
+  catch (error) {
     return actionFailure('List projects', error instanceof Error ? error.message : 'Failed to load projects')
   }
 }
 
-export async function createProject(
-  input: CreateProjectInput
-): Promise<ActionResult<ProjectListItem>> {
+
+
+
+
+export async function createProject(input: CreateProjectInput): Promise<ActionResult<ProjectListItem>> {
+  
   const parsed = createProjectSchema.safeParse(input)
-  if (!parsed.success) {
-    return actionFailure('Create project', 'Project details are invalid', ErrorCode.TOOL_EXECUTION_FAILED)
-  }
+  if (!parsed.success) return actionFailure('Create project', 'Project details are invalid', ErrorCode.TOOL_EXECUTION_FAILED)
 
   const cleanInput = parsed.data
   const repoUrl = sanitizeRepoUrl(cleanInput.repositoryUrl)
 
   try {
-    const project = await prisma.project.create({
-      data: {
-        name: cleanInput.name,
-        repo_url: repoUrl,
-        branch_name: cleanInput.branchName ?? null,
-        context: cleanInput.context ?? '',
-        github_token: cleanInput.repositoryToken ?? null,
-      },
-    })
+    const project = await prisma.project.create(
+      {
+        data: {
+          name: cleanInput.name,
+          repo_url: repoUrl,
+          branch_name: cleanInput.branchName ?? null,
+          context: cleanInput.context ?? '',
+          github_token: cleanInput.repositoryToken ?? null,
+        },
+      }
+    )
 
     await provisionSandbox(project.id)
 
@@ -75,17 +87,22 @@ export async function createProject(
         hasCredentials: Boolean(cleanInput.repositoryToken),
       },
     }
-  } catch (error) {
+  } 
+  catch (error) {
     return actionFailure('Create project', error instanceof Error ? error.message : 'Failed to create project')
   }
 }
 
+
+
+
+
 export async function updateProject(id: string, input: UpdateProjectInput) {
   const cleanId = id.trim()
+
   const parsed = updateProjectSchema.safeParse(input)
-  if (!parsed.success) {
-    return actionFailure('Update project', 'Project update data is invalid', ErrorCode.TOOL_EXECUTION_FAILED)
-  }
+  if (!parsed.success) return actionFailure('Update project', 'Project update data is invalid', ErrorCode.TOOL_EXECUTION_FAILED)
+  
 
   const updateData: Record<string, string | null> = {}
   if (parsed.data.name !== undefined) updateData.name = parsed.data.name
@@ -99,17 +116,19 @@ export async function updateProject(id: string, input: UpdateProjectInput) {
     })
 
     return { ok: true, data: safeProject(project) }
-  } catch (error) {
-    return actionFailure('Update project', error instanceof Error ? error.message : 'Failed to update project')
-  }
+  } 
+  catch (error) { return actionFailure('Update project', error instanceof Error ? error.message : 'Failed to update project')}
 }
+
+
+
+
 
 export async function deleteProject(id: string): Promise<ActionResult<undefined>> {
   try {
     await prisma.project.delete({ where: { id: id.trim() } })
     return { ok: true, data: undefined }
-  } catch (error) {
-    return actionFailure('Delete project', error instanceof Error ? error.message : 'Failed to delete project')
-  }
+  } 
+  catch (error) {return actionFailure('Delete project', error instanceof Error ? error.message : 'Failed to delete project')}
 }
 

@@ -7,6 +7,8 @@ import { encrypt, readProjectCredentials, writeProjectCredentials } from '../cre
 import { actionFailure } from '../action-utils'
 import { providerSchema } from '../safe'
 
+
+
 const saveCredentialsSchema = z.object({
   provider: providerSchema.optional(),
   apiKey: z.string().trim().max(500).optional().or(z.literal('')).transform((value) => value?.trim() || undefined),

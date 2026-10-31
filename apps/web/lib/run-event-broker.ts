@@ -21,12 +21,7 @@ export class RunEventBroker {
     private readonly persistence: Pick<AgentRunPersistence, 'listRunLogsAfter'>
   ) {}
 
-  subscribe(
-    runId: string,
-    onEvent: (event: AgentRunLogEvent) => void,
-    afterId: number,
-    onError: (message: string) => void
-  ) {
+  subscribe(runId: string, onEvent: (event: AgentRunLogEvent) => void , afterId: number , onError: (message: string) => void) {
     const runSubscribers = this.subscribers.get(runId) ?? new Set<Subscriber>()
 
     const subscriber: Subscriber = {
@@ -48,7 +43,9 @@ export class RunEventBroker {
 
     void this.replay(runId, subscriber, afterId)
     return subscriber.unsubscribe
+
   }
+
 
   publish(event: AgentRunLogEvent): void {
     const subscribers = this.subscribers.get(event.runId)
@@ -58,22 +55,16 @@ export class RunEventBroker {
       if (subscriber.replaying) subscriber.buffered.push(event)
       else this.send(subscriber, event)
     }
+
   }
 
-  private async replay(
-    runId: string,
-    subscriber: Subscriber,
-    afterId: number
-  ): Promise<void> {
+  private async replay(runId: string,subscriber: Subscriber,afterId: number): Promise<void> {
+    
     let cursor = afterId
 
     while (!subscriber.closed) {
       try {
-        const page = await this.persistence.listRunLogsAfter(
-          runId,
-          cursor,
-          REPLAY_PAGE_SIZE
-        )
+        const page = await this.persistence.listRunLogsAfter(runId,cursor,REPLAY_PAGE_SIZE)
 
         if (subscriber.closed) return
         if (!page.ok) {

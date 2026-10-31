@@ -8,32 +8,40 @@ import { actionFailure } from '../action-utils'
 
 const titleSchema = z.string().trim().max(150).optional()
 
+
 const safeConversation = (conversation: {
   id: string
   project_id: string
   title: string | null
   created_at: Date
   updated_at: Date
-}): ConversationItem => ({
-  id: conversation.id,
-  projectId: conversation.project_id,
-  title: conversation.title,
-  createdAt: conversation.created_at,
-  updatedAt: conversation.updated_at,
-})
+}): ConversationItem => (
+  {
+    id: conversation.id,
+    projectId: conversation.project_id,
+    title: conversation.title,
+    createdAt: conversation.created_at,
+    updatedAt: conversation.updated_at,
+  }
+)
 
-export async function listConversations(
-  projectId: string
-): Promise<ActionResult<ConversationItem[]>> {
+
+
+
+
+export async function listConversations(projectId: string): Promise<ActionResult<ConversationItem[]>> {
+  
   try {
-    const conversations = await prisma.conversation.findMany({
-      where: { project_id: projectId },
-      orderBy: { updated_at: 'desc' },
-      include: {
-        _count: { select: { messages: true } },
-        runs: { orderBy: { created_at: 'desc' }, take: 1 },
-      },
-    })
+    const conversations = await prisma.conversation.findMany(
+      {
+        where: { project_id: projectId },
+        orderBy: { updated_at: 'desc' },
+        include: {
+          _count: { select: { messages: true } },
+          runs: { orderBy: { created_at: 'desc' }, take: 1 },
+        },
+      }
+    )
 
     return {
       ok: true,
@@ -52,47 +60,57 @@ export async function listConversations(
           : null,
       })),
     }
-  } catch (error) {
+  } 
+  catch (error) {
     return actionFailure('List conversations', error instanceof Error ? error.message : 'Failed to load conversations')
   }
 }
 
-export async function createConversation(
-  projectId: string,
-  title?: string
-): Promise<ActionResult<ConversationItem>> {
+
+
+
+
+export async function createConversation(projectId: string,title?: string): Promise<ActionResult<ConversationItem>> {
+  
   const parsed = titleSchema.safeParse(title)
-  if (!parsed.success) {
-    return actionFailure('Create conversation', 'Title is too long', ErrorCode.TOOL_EXECUTION_FAILED)
-  }
+  if (!parsed.success) return actionFailure('Create conversation', 'Title is too long', ErrorCode.TOOL_EXECUTION_FAILED)
 
   try {
-    const conversation = await prisma.conversation.create({
-      data: {
-        project_id: projectId,
-        title: parsed.data ?? null,
-      },
-    })
+    const conversation = await prisma.conversation.create(
+      {
+        data: {
+          project_id: projectId,
+          title: parsed.data ?? null,
+        },
+      }
+    )
 
     return { ok: true, data: safeConversation(conversation) }
-  } catch (error) {
+
+  } 
+  catch (error) {
     return actionFailure('Create conversation', error instanceof Error ? error.message : 'Failed to create conversation')
   }
 }
 
+
+
+
+
 export async function getConversation(id: string): Promise<ActionResult<ConversationDetails>> {
   try {
-    const conversation = await prisma.conversation.findUnique({
-      where: { id },
-      include: {
-        messages: { orderBy: { created_at: 'asc' } },
-        runs: { orderBy: { created_at: 'desc' } },
-      },
-    })
+    const conversation = await prisma.conversation.findUnique(
+      {
+        where: { id },
+        include: {
+          messages: { orderBy: { created_at: 'asc' } },
+          runs: { orderBy: { created_at: 'desc' } },
+        },
+      }
+    )
 
-    if (!conversation) {
-      return actionFailure('Get conversation', 'Conversation not found', ErrorCode.TASK_NOT_FOUND)
-    }
+    if (!conversation) return actionFailure('Get conversation', 'Conversation not found', ErrorCode.TASK_NOT_FOUND)
+    
 
     const data = {
       ...safeConversation(conversation),
@@ -115,28 +133,34 @@ export async function getConversation(id: string): Promise<ActionResult<Conversa
     } satisfies ConversationDetails
 
     return { ok: true, data }
-  } catch (error) {
+  } 
+  catch (error) {
     return actionFailure('Get conversation', error instanceof Error ? error.message : 'Failed to load conversation')
   }
 }
 
+
+
+
+
 export async function updateConversation(id: string, title: string): Promise<ActionResult<ConversationItem>> {
   const parsed = titleSchema.safeParse(title)
-  if (!parsed.success) {
-    return actionFailure('Update conversation', 'Title is too long', ErrorCode.TOOL_EXECUTION_FAILED)
-  }
+  if (!parsed.success) return actionFailure('Update conversation', 'Title is too long', ErrorCode.TOOL_EXECUTION_FAILED)
+  
 
   try {
-    const conversation = await prisma.conversation.update({
-      where: { id },
-      data: { title: parsed.data ?? null },
-    })
+    const conversation = await prisma.conversation.update({where: { id }, data: { title: parsed.data ?? null },})
 
     return { ok: true, data: safeConversation(conversation) }
-  } catch (error) {
+  } 
+  catch (error) {
     return actionFailure('Update conversation', error instanceof Error ? error.message : 'Failed to update conversation')
   }
 }
+
+
+
+
 
 export async function deleteConversation(id: string): Promise<ActionResult<undefined>> {
   try {
@@ -147,18 +171,21 @@ export async function deleteConversation(id: string): Promise<ActionResult<undef
   }
 }
 
-export async function listMessages(
-  conversationId: string,
-  cursor?: string,
-  limit = 50
-): Promise<ActionResult<{ messages: any[]; nextCursor: string | null }>> {
+
+
+
+
+export async function listMessages(conversationId: string,cursor?: string,limit = 50): Promise<ActionResult<{ messages: any[]; nextCursor: string | null }>> {
+  
   try {
-    const messages = await prisma.message.findMany({
-      where: { conversation_id: conversationId },
-      orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      take: limit + 1,
-    })
+    const messages = await prisma.message.findMany(
+      {
+        where: { conversation_id: conversationId },
+        orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        take: limit + 1,
+      }
+    )
 
     const hasMore = messages.length > limit
     const page = messages.slice(0, limit)
@@ -176,32 +203,35 @@ export async function listMessages(
         nextCursor: hasMore ? page.at(-1)?.id ?? null : null,
       },
     }
-  } catch (error) {
+  } 
+  catch (error) {
     return actionFailure('List messages', error instanceof Error ? error.message : 'Failed to load messages')
   }
 }
 
-export async function addMessage(
-  conversationId: string,
-  content: string
-): Promise<ActionResult<{ id: string }>> {
+
+
+
+
+export async function addMessage(conversationId: string,content: string): Promise<ActionResult<{ id: string }>> {
+  
   const parsed = z.string().trim().min(1).safeParse(content)
-  if (!parsed.success) {
-    return actionFailure('Add message', 'Message cannot be empty')
-  }
+  if (!parsed.success) return actionFailure('Add message', 'Message cannot be empty')
+
 
   try {
-    const message = await prisma.message.create({
-      data: {
-        conversation_id: conversationId,
-        role: 'user',
-        content: parsed.data,
-      },
-    })
+    const message = await prisma.message.create(
+      {
+        data: {
+          conversation_id: conversationId,
+          role: 'user',
+          content: parsed.data,
+        },
+      }
+    )
 
     return { ok: true, data: { id: message.id } }
-  } catch (error) {
-    return actionFailure('Add message', error instanceof Error ? error.message : 'Failed to add message')
-  }
+  } 
+  catch (error) { return actionFailure('Add message', error instanceof Error ? error.message : 'Failed to add message')}
 }
 

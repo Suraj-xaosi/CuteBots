@@ -21,9 +21,8 @@ export const containers = ContainerManager.getInstance()
 
 export async function getSandbox(projectId: string): Promise<Result<any>> {
   const cleanId = projectId.trim()
-  if (!cleanId) {
-    return { ok: false, error: 'Project id is missing', code: ErrorCode.TASK_NOT_FOUND }
-  }
+  if (!cleanId) return { ok: false, error: 'Project id is missing', code: ErrorCode.TASK_NOT_FOUND }
+  
 
   const sandbox = containers.get(cleanId)
   if (sandbox.ok) return sandbox
@@ -34,17 +33,21 @@ export async function getSandbox(projectId: string): Promise<Result<any>> {
   return containers.create(cleanId)
 }
 
+
+
 export const runs = AgentLoopManager.getInstance((context) => {
   let loop: AgentLoop | undefined
 
   return {
     async run() {
       try {
-        const [project, credentials, sandboxResult] = await Promise.all([
-          prisma.project.findUnique({ where: { id: context.projectId } }),
-          readProjectCredentials(context.projectId),
-          getSandbox(context.projectId),
-        ])
+        const [project, credentials, sandboxResult] = await Promise.all(
+          [
+            prisma.project.findUnique({ where: { id: context.projectId } }),
+            readProjectCredentials(context.projectId),
+            getSandbox(context.projectId),
+          ]
+        )
 
         if (!project || !sandboxResult.ok) return
         if (!credentials) return
@@ -81,7 +84,8 @@ export const runs = AgentLoopManager.getInstance((context) => {
 
         loop = new AgentLoop(persistence, llm, tools, sandbox, channel)
         await loop.run(context)
-      } catch (error) {
+      } 
+      catch (error) {
         console.error('Agent run crashed', { runId: context.runId, error })
 
         await persistence
