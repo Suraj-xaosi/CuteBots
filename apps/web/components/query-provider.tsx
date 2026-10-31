@@ -1,18 +1,21 @@
 "use client"
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
+import { Provider as ReduxProvider } from "react-redux"
+import { QueryClientProvider } from "@tanstack/react-query"
+import { getQueryClient } from "@/hooks/get-query-client"
+import { makeStore } from "@/store/store"
 
-export function QueryProvider({ children }: { children: React.ReactNode }) {
-  const [client] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: { staleTime: 0, gcTime: 0, retry: false },
-          mutations: { gcTime: 0, retry: false },
-        },
-      })
+// Mount once in app/layout.tsx (a server component) around {children}.
+// useState with a lazy initializer creates each thing exactly once per mount,
+// no useRef flag and no effect.
+export function Providers({ children }: { children: ReactNode }) {
+  const [queryClient] = useState(getQueryClient)
+  const [store] = useState(makeStore)
+
+  return (
+    <ReduxProvider store={store}>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </ReduxProvider>
   )
-
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>
 }

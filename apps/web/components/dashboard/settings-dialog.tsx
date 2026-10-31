@@ -1,16 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { useMutation } from "@tanstack/react-query"
-import {
-  PROVIDER_NAMES,
-  isProviderName,
-  type ProviderName,
-} from "@workspace/types"
-import {
-  getProjectCredentials,
-  saveProjectCredentials,
-} from "@/lib/actions/project-credentials"
+import { useRef, useState } from "react"
+import { PROVIDER_NAMES, isProviderName, type ProviderName } from "@workspace/types"
 import { Button } from "@workspace/ui/components/button"
 import {
   Dialog,
@@ -28,7 +19,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
+import {
+  useProjectCredentials,
+  useSaveProjectCredentials,
+} from "../../hooks/use-project-credentials"
 
+type Credentials = NonNullable<ReturnType<typeof useProjectCredentials>["data"]>
+
+// The dialog owns the fetch (it starts when `open` turns true).
+// The form is a separate component that only mounts once the data exists,
+// so its useState can start from the server values directly. That is what
+// replaces "fetch, then copy into state in an effect".
 export function SettingsDialog({
   projectId,
   open,
@@ -38,54 +39,10 @@ export function SettingsDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const [provider, setProvider] = useState<ProviderName>("openai")
-  const [model, setModel] = useState("")
-  const [baseUrl, setBaseUrl] = useState("")
-  const [apiKey, setApiKey] = useState("")
-  const [tavilyApiKey, setTavilyApiKey] = useState("")
-  const [repositoryToken, setRepositoryToken] = useState("")
-  const [loaded, setLoaded] = useState(false)
-  const [message, setMessage] = useState("")
-  const save = useMutation({
-    mutationFn: () =>
-      saveProjectCredentials(projectId, {
-        provider,
-        model,
-        baseUrl,
-        ...(apiKey ? { apiKey } : {}),
-        ...(tavilyApiKey ? { tavilyApiKey } : {}),
-        ...(repositoryToken ? { repositoryToken } : {}),
-      }),
-    gcTime: 0,
-    onSuccess: (result) => {
-      setMessage(result.ok ? "Settings saved securely." : result.error)
-      if (result.ok) {
-        setApiKey("")
-        setTavilyApiKey("")
-        setRepositoryToken("")
-      }
-    },
-  })
-
-  const openSettings = async (next: boolean) => {
-    onOpenChange(next)
-    if (!next || loaded) return
-
-    const result = await getProjectCredentials(projectId)
-    if (!result.ok) {
-      setMessage(result.error)
-      return
-    }
-
-    const credentials = result.data
-    setProvider(isProviderName(credentials.provider) ? credentials.provider : "openai")
-    setModel(credentials.model ?? "")
-    setBaseUrl(credentials.baseUrl ?? "")
-    setLoaded(true)
-  }
+  const credentials = useProjectCredentials(projectId, open)
 
   return (
-    <Dialog open={open} onOpenChange={openSettings}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Project settings</DialogTitle>
@@ -93,51 +50,109 @@ export function SettingsDialog({
             Secret fields are encrypted at rest and never displayed again.
           </DialogDescription>
         </DialogHeader>
-        <Field>
-          <FieldLabel>AI provider</FieldLabel>
-          <Select
-            value={provider}
-            onValueChange={(value) => {
-              if (isProviderName(value)) setProvider(value)
-            }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PROVIDER_NAMES.map((name) => (
-                <SelectItem key={name} value={name}>
-                  {name.charAt(0).toUpperCase() + name.slice(1)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="settings-model">Model</FieldLabel>
-          <Input id="settings-model" value={model} onChange={(event) => setModel(event.target.value)} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="settings-url">Provider URL</FieldLabel>
-          <Input id="settings-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="settings-key">Replace API key</FieldLabel>
-          <Input id="settings-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="settings-tavily">Replace Tavily key</FieldLabel>
-          <Input id="settings-tavily" type="password" value={tavilyApiKey} onChange={(event) => setTavilyApiKey(event.target.value)} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="settings-repo-token">Replace repository token</FieldLabel>
-          <Input id="settings-repo-token" type="password" value={repositoryToken} onChange={(event) => setRepositoryToken(event.target.value)} />
-        </Field>
-        {message ? <DialogDescription>{message}</DialogDescription> : null}
-        <Button onClick={() => save.mutate()} disabled={!loaded || save.isPending}>
-          {save.isPending ? "Saving…" : "Save settings"}
-        </Button>
+        {credentials.data ? (
+          <SettingsForm key={projectId} projectId={projectId} initial={credentials.data} />
+        ) : credentials.isError ? (
+          <DialogDescription className="text-destructive">
+            {credentials.error?.message}
+          </DialogDescription>
+        ) : (
+          <DialogDescription>Loading settings…</DialogDescription>
+        )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+function SettingsForm({ projectId, initial }: { projectId: string; initial: Credentials }) {
+  const [provider, setProvider] = useState<ProviderName>(
+    isProviderName(initial.provider) ? initial.provider : "openai"
+  )
+  const [model, setModel] = useState(initial.model ?? "")
+  const [baseUrl, setBaseUrl] = useState(initial.baseUrl ?? "")
+  const apiKey = useRef<HTMLInputElement>(null)
+  const tavilyKey = useRef<HTMLInputElement>(null)
+  const repositoryToken = useRef<HTMLInputElement>(null)
+  const save = useSaveProjectCredentials(projectId)
+
+  const submit = () => {
+    const key = apiKey.current?.value
+    const tavily = tavilyKey.current?.value
+    const token = repositoryToken.current?.value
+
+    save.mutate(
+      {
+        provider,
+        model,
+        baseUrl,
+        ...(key ? { apiKey: key } : {}),
+        ...(tavily ? { tavilyApiKey: tavily } : {}),
+        ...(token ? { repositoryToken: token } : {}),
+      },
+      {
+        // Secrets are write-only: wipe the inputs once they are saved.
+        onSuccess: () => {
+          for (const input of [apiKey, tavilyKey, repositoryToken]) {
+            if (input.current) input.current.value = ""
+          }
+        },
+      }
+    )
+  }
+
+  return (
+    <>
+      <Field>
+        <FieldLabel>AI provider</FieldLabel>
+        <Select
+          value={provider}
+          onValueChange={(value) => {
+            if (isProviderName(value)) setProvider(value)
+          }}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PROVIDER_NAMES.map((option) => (
+              <SelectItem key={option} value={option}>
+                {option.charAt(0).toUpperCase() + option.slice(1)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="settings-model">Model</FieldLabel>
+        <Input id="settings-model" value={model} onChange={(event) => setModel(event.target.value)} />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="settings-url">Provider URL</FieldLabel>
+        <Input
+          id="settings-url"
+          value={baseUrl}
+          onChange={(event) => setBaseUrl(event.target.value)}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="settings-key">Replace API key</FieldLabel>
+        <Input id="settings-key" ref={apiKey} type="password" />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="settings-tavily">Replace Tavily key</FieldLabel>
+        <Input id="settings-tavily" ref={tavilyKey} type="password" />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="settings-repo-token">Replace repository token</FieldLabel>
+        <Input id="settings-repo-token" ref={repositoryToken} type="password" />
+      </Field>
+      {save.error ? (
+        <DialogDescription className="text-destructive">{save.error.message}</DialogDescription>
+      ) : null}
+      {save.isSuccess ? <DialogDescription>Settings saved securely.</DialogDescription> : null}
+      <Button onClick={submit} disabled={save.isPending}>
+        {save.isPending ? "Saving…" : "Save settings"}
+      </Button>
+    </>
   )
 }

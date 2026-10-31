@@ -1,5 +1,6 @@
 import "@workspace/ui/globals.css"
-import { QueryProvider } from "@/components/query-provider"
+import { Providers } from "@/components/query-provider"
+
 
 export const metadata = {
   title: "CuteBots",
@@ -14,7 +15,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <QueryProvider>{children}</QueryProvider>
+        <Providers>
+          {children}
+        </Providers>
       </body>
     </html>
   )
