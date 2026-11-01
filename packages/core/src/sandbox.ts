@@ -1,10 +1,11 @@
 import { ErrorCode, type Result } from "@workspace/types";
 import { commandError, commandOutput, isDockerTransportError, runDocker } from "./docker.js";
 import { SandboxCommandJobs, type CommandJobSnapshot } from "./sandbox/command-jobs.js";
-import { SandboxFileOperations } from "./sandbox/file-operations.js";
+import { SandboxFileOperations, type DirectoryEntry } from "./sandbox/file-operations.js";
 import { COMMAND_FOREGROUND_TIMEOUT_MS, WORKSPACE_ROOT } from "./sandbox/constants.js";
 
 export type { CommandJobSnapshot } from "./sandbox/command-jobs.js";
+export type { DirectoryEntry } from "./sandbox/file-operations.js";
 
 export class Sandbox {
   private containerId: string | null = null;
@@ -143,6 +144,10 @@ export class Sandbox {
 
   async listFiles(directoryPath: string): Promise<Result<string>> {
     return this.fileOperations.listFiles(directoryPath);
+  }
+
+  async listDirectory(directoryPath: string): Promise<Result<DirectoryEntry[]>> {
+    return this.fileOperations.listDirectory(directoryPath);
   }
 
   async exportBranchBundle(branch: string): Promise<Result<Buffer>> {

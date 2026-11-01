@@ -5,7 +5,7 @@ import { ErrorCode, type ActionResult, type CreateProjectInput, type ProjectList
 import { z } from 'zod'
 import { provisionSandbox } from '../sandbox-service'
 import { actionFailure } from '../action-utils'
-import { encrypt, readProjectCredentials, writeProjectCredentials } from '../credentials'
+import { credentialsProblem, encrypt, hasUsableCredentials, normalizeCredentials, readProjectCredentials, writeProjectCredentials } from '../credentials'
 import { isCleanGitHubRepoUrl, providerSchema, sanitizeRepoUrl } from '../safe'
 
 
@@ -49,10 +49,8 @@ const safeProject = (project: Prisma.ProjectGetPayload<object>): ProjectView => 
   updatedAt: project.updated_at,
 })
 
-// "Usable" = the agent could actually call an LLM. (Not the same as repo token.)
-const hasUsableCredentials = (credentials: Record<string, string> | null) =>
- // Boolean(credentials?.provider && (credentials.apiKey || credentials.provider === 'ollama'))
-  Boolean(credentials?.provider && credentials.apiKey )
+// hasUsableCredentials now lives in ../credentials (one definition, used everywhere).
+
 
 
 
@@ -96,6 +94,14 @@ export async function createProject(input: CreateProjectInput): Promise<ActionRe
   if (cleanInput.baseUrl) credentialValues.baseUrl = cleanInput.baseUrl
   if (cleanInput.tavilyApiKey) credentialValues.tavilyApiKey = cleanInput.tavilyApiKey
 
+  // Same rules as saveProjectCredentials: validate BEFORE creating anything.
+  const credentials = normalizeCredentials(credentialValues)
+  const problem = credentialsProblem({
+    ...credentials,
+    ...(cleanInput.repositoryToken ? { repositoryToken: cleanInput.repositoryToken } : {}),
+  })
+  if (problem) return actionFailure('Create project', problem)
+
   // 2. Create the record only (fast). Token is encrypted here, once, at the boundary.
   //    encrypt() runs before create(): if the key is missing, no row is created.
   let project: Prisma.ProjectGetPayload<object>
@@ -116,9 +122,9 @@ export async function createProject(input: CreateProjectInput): Promise<ActionRe
   }
 
   // 3. Save LLM credentials (encrypted). If this fails, undo the row: no half-created project.
-  if (Object.keys(credentialValues).length > 0) {
+  if (Object.keys(credentials).length > 0) {
     try {
-      await writeProjectCredentials(project.id, credentialValues)
+      await writeProjectCredentials(project.id, credentials)
     } catch (error) {
       await prisma.project.delete({ where: { id: project.id } }).catch(() => null)
       return actionFailure('Create project', error instanceof Error ? error.message : 'Failed to save credentials')
@@ -136,7 +142,7 @@ export async function createProject(input: CreateProjectInput): Promise<ActionRe
     ok: true,
     data: {
       ...safeProject(project),
-      hasCredentials: hasUsableCredentials(credentialValues),
+      hasCredentials: hasUsableCredentials(credentials),
     },
   }
 }

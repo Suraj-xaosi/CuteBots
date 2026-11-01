@@ -4,6 +4,11 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { prisma } from '@workspace/db'
 import { parseJsonRecord } from './safe'
 
+// Lets callers pass either the global client or a transaction client (tx).
+type Db = Pick<typeof prisma, 'setting'>
+
+const credentialsKey = (projectId: string) => `project:${projectId}:credentials`
+
 function encryptionKey() {
   const key = process.env.CREDENTIALS_ENCRYPTION_KEY
   const decoded = key ? Buffer.from(key, 'base64') : Buffer.alloc(0)
@@ -36,9 +41,8 @@ export function decrypt(text: string) {
   ]).toString('utf-8')
 }
 
-export async function readProjectCredentials(projectId: string) {
-  const key = `project:${projectId}:credentials`
-  const setting = await prisma.setting.findUnique({ where: { key } })
+export async function readProjectCredentials(projectId: string, db: Db = prisma) {
+  const setting = await db.setting.findUnique({ where: { key: credentialsKey(projectId) } })
   if (!setting) return null
 
   try {
@@ -58,31 +62,81 @@ export async function readProjectCredentials(projectId: string) {
   }
 }
 
+// CHANGED (Lesson 3): this now REPLACES the stored credentials with exactly
+// what you pass in. The old version could only add/overwrite, so a value could
+// never be removed. Callers do the merging (see saveProjectCredentials).
+// An empty object deletes the row.
 export async function writeProjectCredentials(
   projectId: string,
-  values: Record<string, string>
+  credentials: Record<string, string>,
+  db: Db = prisma
 ) {
-  const existing = (await readProjectCredentials(projectId)) ?? {}
-  const credentials: Record<string, string> = { ...existing }
-
-  for (const [key, value] of Object.entries(values)) {
-    const cleaned = value?.trim()
-    if (cleaned) credentials[key] = cleaned
+  const cleaned: Record<string, string> = {}
+  for (const [name, value] of Object.entries(credentials)) {
+    const trimmed = value?.trim()
+    if (trimmed) cleaned[name] = trimmed
   }
 
-  const key = `project:${projectId}:credentials`
-  await prisma.setting.upsert({
+  const key = credentialsKey(projectId)
+  if (Object.keys(cleaned).length === 0) {
+    await db.setting.deleteMany({ where: { key } })
+    return cleaned
+  }
+
+  const value = encrypt(JSON.stringify(cleaned))
+  await db.setting.upsert({
     where: { key },
-    create: {
-      key,
-      value: encrypt(JSON.stringify(credentials)),
-      is_secret: true,
-    },
-    update: {
-      value: encrypt(JSON.stringify(credentials)),
-      is_secret: true,
-    },
+    create: { key, value, is_secret: true },
+    update: { value, is_secret: true },
   })
 
-  return credentials
+  return cleaned
+}
+
+// NEW: used by the project-delete lesson so no encrypted secrets are left behind.
+export async function deleteProjectCredentials(projectId: string, db: Db = prisma) {
+  await db.setting.deleteMany({ where: { key: credentialsKey(projectId) } })
+}
+
+// NEW: one definition of "the agent can actually call an LLM".
+export function hasUsableCredentials(credentials: Record<string, string> | null) {
+  return Boolean(credentials?.provider && (credentials.apiKey || credentials.provider === 'ollama'))
+}
+
+// NEW: anthropic ignores baseUrl, so never keep a stale one around.
+export function normalizeCredentials(credentials: Record<string, string>) {
+  const next = { ...credentials }
+  if (next.provider === 'anthropic') delete next.baseUrl
+  return next
+}
+
+const SECRET_FIELDS = ['apiKey', 'tavilyApiKey', 'repositoryToken'] as const
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]', 'host.docker.internal'])
+
+// NEW: returns a human-readable problem, or null if the values are acceptable.
+// Why it matters: the API key is sent to baseUrl, so baseUrl must be trustworthy.
+export function credentialsProblem(credentials: Record<string, string>): string | null {
+  for (const field of SECRET_FIELDS) {
+    const value = credentials[field]
+    if (value && /\s/.test(value)) return 'Keys and tokens cannot contain spaces or line breaks'
+  }
+
+  const baseUrl = credentials.baseUrl
+  if (baseUrl) {
+    let url: URL
+    try {
+      url = new URL(baseUrl)
+    } catch {
+      return 'Base URL is not a valid URL'
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return 'Base URL must start with http:// or https://'
+    }
+    if (url.username || url.password) return 'Base URL cannot contain a username or password'
+    if (url.protocol === 'http:' && !LOCAL_HOSTS.has(url.hostname)) {
+      return 'Use https:// for remote base URLs (http:// is only allowed for localhost)'
+    }
+  }
+
+  return null
 }

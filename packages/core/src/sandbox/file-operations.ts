@@ -8,6 +8,14 @@ import { commandError, runDocker } from "../docker.js";
 import { FILE_OP_TIMEOUT_MS, WORKSPACE_ROOT } from "./constants.js";
 
 const LARGE_FILE_BYTES = 100 * 1024;
+const MAX_DIRECTORY_ENTRIES = 500;
+
+export interface DirectoryEntry {
+  name: string;
+  kind: "file" | "directory" | "symlink" | "other";
+  size: number;
+  modifiedAtMs: number;
+}
 
 export class SandboxFileOperations {
   constructor(private readonly getContainerId: () => string | null) {}
@@ -108,6 +116,52 @@ export class SandboxFileOperations {
       return this.failure(commandError(result), this.errorCodeFor(result));
     }
     return { ok: true, data: result.stdout.trimEnd() };
+  }
+
+  // NEW (Lesson 2): one directory level, with type/size/mtime.
+  // The path travels as a docker argument ($1), never inside a shell string,
+  // so there is nothing to inject into. resolveWorkspacePath keeps it in /workspace.
+  async listDirectory(directoryPath: string): Promise<Result<DirectoryEntry[]>> {
+    const absolutePath = this.resolveWorkspacePath(directoryPath);
+    if (!absolutePath) {
+      return this.failure("Directory path must stay inside /workspace", ErrorCode.CONTAINER_EXEC_FAILED);
+    }
+    const containerId = this.getContainerId();
+    if (!containerId) {
+      return this.failure("Sandbox has not been created", ErrorCode.CONTAINER_NOT_FOUND);
+    }
+
+    const result = await runDocker(
+      [
+        "exec",
+        containerId,
+        "sh",
+        "-c",
+        `find "$1" -mindepth 1 -maxdepth 1 -printf '%y\\t%s\\t%T@\\t%f\\n' | head -n ${MAX_DIRECTORY_ENTRIES}`,
+        "sandbox-ls",
+        absolutePath,
+      ],
+      { timeoutMs: FILE_OP_TIMEOUT_MS },
+    );
+
+    if (result.timedOut || result.exitCode !== 0 || (result.stderr.trim() && !result.stdout.trim())) {
+      return this.failure(commandError(result) || `Directory not found: ${directoryPath}`, this.errorCodeFor(result));
+    }
+
+    const entries: DirectoryEntry[] = [];
+    for (const line of result.stdout.split("\n")) {
+      if (!line) continue;
+      const [type, size, modified, ...nameParts] = line.split("\t");
+      const name = nameParts.join("\t");
+      if (!type || !name) continue;
+      entries.push({
+        name,
+        kind: type === "f" ? "file" : type === "d" ? "directory" : type === "l" ? "symlink" : "other",
+        size: Number(size) || 0,
+        modifiedAtMs: Math.round((Number(modified) || 0) * 1000),
+      });
+    }
+    return { ok: true, data: entries };
   }
 
   async exportBranchBundle(branch: string): Promise<Result<Buffer>> {
