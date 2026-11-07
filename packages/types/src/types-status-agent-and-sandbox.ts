@@ -1,9 +1,4 @@
-export enum TaskStatus {
-  RUNNING = "RUNNING",
-  INTERRUPTED = "INTERRUPTED",
-  DONE = "DONE",
-  FAILED = "FAILED",
-}
+
 
 export enum AgentRunStatus{
   QUEUED="QUEUED",

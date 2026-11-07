@@ -17,6 +17,9 @@
       "import": "./dist/*.js"
     }
   },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
   "devDependencies": {
     "@workspace/typescript-config": "*",
     "typescript": "^5"

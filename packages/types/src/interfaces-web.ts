@@ -3,10 +3,10 @@ import type {
   MessageRoleValue,
   ProjectProvisionStatusValue,
   SandboxStatusValue,
-} from "./domain.js";
-import type { AgentRunLogType } from "./events.js";
-import { isProviderName, type ProviderName } from "./llm.js";
-import type { ErrorCode } from "./result.js";
+} from "./types-status-agent-and-sandbox.js";
+import type { AgentRunLogType } from "./interfaces-agentlog.js";
+import { isProviderName, type ProviderName } from "./interfaces-llm.js";
+import type { ErrorCode } from "./types-result-errorcode.js";
 
 export type ActionResult<T> =
   | { ok: true; data: T }
@@ -49,7 +49,7 @@ export interface UpdateProjectInput {
   branchName?: string | null;
   context?: string;
 }
-
+/*
 export interface SaveProjectCredentialsInput {
   provider?: ProviderName;
   apiKey?: string;
@@ -78,7 +78,7 @@ export function isSaveProjectCredentialsInput(
     ].every((key) => input[key] === undefined || typeof input[key] === "string")
   );
 }
-
+*/
 export interface ProjectCredentialsView {
   provider: ProviderName | "";
   model: string;

@@ -1,4 +1,4 @@
-import type { Result } from "./result.js";
+import type { Result } from "./types-result-errorcode.js";
 
 export interface ToolDefinition {
   name: string;
