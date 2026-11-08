@@ -1,11 +1,7 @@
-import { ErrorCode, type Result } from "@workspace/types";
+import { askHumanSchema, ErrorCode, type Result } from "@workspace/types";
 import { z } from "zod";
 import { Tool, type ToolResult } from "./tool.js";
 import type { Sandbox } from "../sandbox.js";
-
-const askHumanSchema = z.object({
-  question: z.string().trim().min(1).max(4_000).describe("Question that requires a human decision"),
-}).strict();
 
 export interface HumanInteraction {
   ask(question: string, timeoutMs: number, signal?: AbortSignal): Promise<Result<string>>;
@@ -34,6 +30,8 @@ export class AskHumanTool extends Tool<typeof askHumanSchema> {
     const result = await this.interaction.ask(args.question, HUMAN_REPLY_TIMEOUT_MS, signal);
     return result.ok
       ? { success: true, output: result.data }
-      : { success: false, output: result.code === ErrorCode.TASK_TIMEOUT ? "Human reply timed out" : result.error };
+      : { success: false, output: result.code === ErrorCode.TASK_TIMEOUT
+        ? "The user did not reply within 10 minutes. Do not ask again. Continue with a safe, reversible assumption, or stop and explain exactly what you need from the user."
+        : result.error };
   }
 }
