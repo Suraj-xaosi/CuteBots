@@ -22,11 +22,12 @@ export class LLMClient implements LLMProvider {
   constructor(config: LLMClientConfig) {
     this.name = config.provider;
     this.apiKey = config.apiKey?.trim() ?? "";
-    if (config.provider !== "ollama" && !this.apiKey) {
-      throw new Error(`An API key is required for ${config.provider}`);
-    }
+
+    if (config.provider !== "ollama" && !this.apiKey) throw new Error(`An API key is required for ${config.provider}`);
+    
 
     const model = config.model ?? defaultModel(config.provider);
+
     if (config.provider === "anthropic") {
       this.model = new ChatAnthropic({
         apiKey: this.apiKey,
@@ -38,6 +39,7 @@ export class LLMClient implements LLMProvider {
     }
 
     const baseURL = config.baseUrl ?? defaultBaseUrl(config.provider);
+
     this.model = new ChatOpenAI({
       apiKey: this.apiKey || "ollama",
       model,
@@ -48,26 +50,19 @@ export class LLMClient implements LLMProvider {
     this.maxContextTokens = config.maxContextTokens ?? contextWindow(config.provider);
   }
 
-  async chat(
-    messages: LLMMessage[],
-    tools: ToolDefinition[],
-    systemPrompt: string,
-    signal?: AbortSignal,
-    onToken?: (token: string) => void,
-  ): Promise<Result<LLMResponse>> {
+  async chat(messages: LLMMessage[],tools: ToolDefinition[],systemPrompt: string,signal?: AbortSignal,onToken?: (token: string) => void,): Promise<Result<LLMResponse>> {
     try {
-      const model = tools.length
-        ? this.model.bindTools(tools.map(toModelTool))
-        : this.model;
+
+      const model = tools.length? this.model.bindTools(tools.map(toModelTool)) : this.model;
+      
       let response;
+
       try {
-        response = await streamModelResponse(
-          model,
-          toLangChainMessages(messages, systemPrompt),
-          signal,
-          onToken,
-        );
-      } catch (error) {
+
+        response = await streamModelResponse(model,toLangChainMessages(messages, systemPrompt),signal,onToken,);
+
+      } 
+      catch (error) {
         if (this.name !== "groq" || !tools.length || !isUnknownToolValidationError(error)) throw error;
         const retryPrompt = [
           systemPrompt,
@@ -82,12 +77,13 @@ export class LLMClient implements LLMProvider {
           onToken,
         );
       }
-      if (!AIMessage.isInstance(response)) {
-        return { ok: false, error: "Model returned a non-assistant message", code: ErrorCode.LLM_API_ERROR };
-      }
+
+      if (!AIMessage.isInstance(response))  return { ok: false, error: "Model returned a non-assistant message", code: ErrorCode.LLM_API_ERROR };
 
       const toolCalls = (response.tool_calls ?? []).map(toToolCall);
+
       const finishReason = readFinishReason(response.response_metadata);
+
       return {
         ok: true,
         data: {
@@ -100,7 +96,8 @@ export class LLMClient implements LLMProvider {
           finish_reason: getFinishReason(finishReason, toolCalls.length > 0),
         },
       };
-    } catch (error) {
+    } 
+    catch (error) {
       return mapProviderError(error, this.apiKey);
     }
   }
@@ -121,8 +118,10 @@ async function streamModelResponse(
   signal?: AbortSignal,
   onToken?: (token: string) => void,
 ) {
+
   const chunks: AIMessageChunk[] = [];
   const stream = await model.stream(messages, { signal });
+
   async function* captureChunks() {
     for await (const chunk of stream) {
       chunks.push(chunk);
@@ -130,15 +129,13 @@ async function streamModelResponse(
     }
   }
 
-  const uiStream = toUIMessageStream(captureChunks(), {
-    sendStart: false,
-    sendFinish: false,
-    onToken,
-  });
+  const uiStream = toUIMessageStream(captureChunks(), {sendStart: false,sendFinish: false,onToken,});
   const reader = uiStream.getReader();
+
   try {
     while (!(await reader.read()).done) {}
-  } finally {
+  } 
+  finally {
     reader.releaseLock();
   }
 
@@ -146,7 +143,9 @@ async function streamModelResponse(
     (combined, chunk) => combined ? combined.concat(chunk) : chunk,
     undefined,
   );
+
   if (!responseChunk) throw new Error("Model returned an empty response stream");
+  
   return new AIMessage({
     content: responseChunk.content,
     tool_calls: responseChunk.tool_calls,
@@ -180,6 +179,7 @@ function toLangChainMessages(messages: LLMMessage[], systemPrompt: string) {
     }),
   ];
 }
+
 
 function toModelTool(tool: ToolDefinition) {
   return {
