@@ -16,6 +16,7 @@ import type { AgentRunGraphStateType } from "./agent-loop-state.js"
 import { MAX_ITERATIONS } from "./agent-loop-state.js"
 import { codingSystemPrompt } from "./agent-loop-utils.js"
 import { chatWithRateLimitRetry } from "./rate-limit-retry.js"
+import { fitToContext } from "./agent-loop-history.js"
 
 export async function callAgentModel(
   context: AgentRunContext,
@@ -37,7 +38,7 @@ export async function callAgentModel(
   if (signal?.aborted) throw new Error("Agent run cancelled")
   if (state.iteration >= MAX_ITERATIONS) {
     throw new Error(
-      `Agent run reached the maximum iteration count (${MAX_ITERATIONS})`
+      `The agent used its ${MAX_ITERATIONS}-step limit for one run. Your work is kept; send "continue" to carry on.`
     )
   }
 
@@ -50,6 +51,8 @@ export async function callAgentModel(
   )
 
   const toolDefinitions = tools.definitions()
+  // Only what is SENT is trimmed; stored history is untouched.
+  const promptMessages = await fitToContext(provider, state.messages)
   const systemPrompt = codingSystemPrompt(
     context.runId,
     context.branchName,
@@ -58,7 +61,6 @@ export async function callAgentModel(
   )
   let tokenWrites = Promise.resolve()
   let tokenWriteFailed = false
-  let tokenWriteError: unknown
   let tokenBuffer = ""
   let lastTokenFlush = Date.now()
 
@@ -78,15 +80,16 @@ export async function callAgentModel(
           content
         )
       } catch (error) {
+        // Live text is a nicety. Losing it must not fail the run.
         tokenWriteFailed = true
-        tokenWriteError = error
+        console.warn("Live token updates stopped", { runId: context.runId, error })
       }
     })
   }
 
   const responseRequest = chatWithRateLimitRetry(
     provider,
-    state.messages,
+    promptMessages,
     toolDefinitions,
     systemPrompt,
     signal,
@@ -94,7 +97,8 @@ export async function callAgentModel(
       publishRunLog(persistence, channel, context.runId, "warn", message),
     (token) => {
       tokenBuffer += token
-      if (tokenBuffer.length >= 48 || Date.now() - lastTokenFlush >= 50) {
+      // Bigger batches = far fewer database rows (was every 48 chars / 50 ms).
+      if (tokenBuffer.length >= 200 || Date.now() - lastTokenFlush >= 150) {
         flushTokens()
       }
     }
@@ -107,7 +111,6 @@ export async function callAgentModel(
     flushTokens()
     await tokenWrites
   }
-  if (tokenWriteFailed) throw tokenWriteError
   if (!response.ok) throw new Error(response.error)
   if (response.data.finish_reason === "length") {
     throw new Error("The model response reached its output token limit")

@@ -4,7 +4,11 @@ import { MessageSquarePlus } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Skeleton } from "@workspace/ui/components/skeleton"
 import { Panel, PanelBody } from "@/components/dashboard/layout/panel"
-import { useConversations, useCreateConversation } from "@/hooks/use-Conversations"
+import {
+  useConversations,
+  useCreateConversation,
+  useDeleteConversation,
+} from "@/hooks/use-conversations"
 import { useActiveConversationId, useSelectedProjectId } from "@/hooks/use-selection"
 import { useAppDispatch } from "@/store/hooks"
 import { workspaceActions } from "@/store/workspace-slice"
@@ -18,6 +22,7 @@ export function ConversationSidebar() {
   const activeId = useActiveConversationId()
   const conversations = useConversations(projectId)
   const create = useCreateConversation()
+  const remove = useDeleteConversation()
 
   const items = conversations.data
 
@@ -55,6 +60,14 @@ export function ConversationSidebar() {
                   title={conversation.title}
                   active={activeId === conversation.id}
                   onSelect={() => dispatch(workspaceActions.conversationSelected(conversation.id))}
+                  onDelete={() => {
+                    if (!projectId) return
+                    const confirmed = window.confirm(
+                      `Delete conversation "${conversation.title || "untitled"}"? This cannot be undone.`
+                    )
+                    if (!confirmed) return
+                    remove.mutate({ conversationId: conversation.id, projectId })
+                  }}
                 />
               </li>
             ))}

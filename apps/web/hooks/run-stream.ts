@@ -11,7 +11,7 @@ import {
   statusFromEventContent,
   withAssistantMessage,
   withRunPatch,
-} from "./convertation-cache"
+} from "./conversation-cache"
 import { conversationQuery, runActivityQuery } from "./queries"
 
 // Plain module, no React. The only place that touches EventSource.

@@ -2,9 +2,10 @@
 
 import { prisma } from '@workspace/db'
 import { redactTextSecrets } from '@workspace/core'
-import { ErrorCode, type ActionResult, type ConversationDetails, type ConversationItem } from '@workspace/types'
+import { ErrorCode, type ActionResult, type ConversationDetails, type ConversationItem, type MessageItem } from '@workspace/types'
 import { z } from 'zod'
 import { actionFailure } from '../action-utils'
+import { cancelRun } from './runs'
 
 const titleSchema = z.string().trim().max(150).optional()
 
@@ -103,7 +104,7 @@ export async function getConversation(id: string): Promise<ActionResult<Conversa
       {
         where: { id },
         include: {
-          messages: { orderBy: { created_at: 'asc' } },
+          messages: { orderBy: [{ created_at: 'asc' }, { id: 'asc' }] },
           runs: { orderBy: { created_at: 'desc' } },
         },
       }
@@ -162,8 +163,28 @@ export async function updateConversation(id: string, title: string): Promise<Act
 
 
 
-export async function deleteConversation(id: string): Promise<ActionResult<undefined>> {
+export async function deleteConversation(
+  id: string,
+  options: { force?: boolean } = {}
+): Promise<ActionResult<undefined>> {
   try {
+    // Deleting a chat cascades to its runs. A run still working would keep writing
+    // into rows that no longer exist, so stop it first (with the user's consent).
+    const active = await prisma.agentRun.findFirst({
+      where: { conversation_id: id, status: { notIn: ['DONE', 'FAILED', 'INTERRUPTED'] } },
+      select: { id: true },
+    })
+    if (active) {
+      if (options?.force !== true) {
+        return actionFailure(
+          'Delete conversation',
+          'The agent is still working in this chat. Hard stop it to continue, or cancel.',
+          ErrorCode.TASK_ALREADY_RUNNING
+        )
+      }
+      await cancelRun(active.id)
+    }
+
     await prisma.conversation.delete({ where: { id } })
     return { ok: true, data: undefined }
   } catch (error) {
@@ -175,17 +196,18 @@ export async function deleteConversation(id: string): Promise<ActionResult<undef
 
 
 
-export async function listMessages(conversationId: string,cursor?: string,limit = 50): Promise<ActionResult<{ messages: any[]; nextCursor: string | null }>> {
-  
+export async function listMessages(
+  conversationId: string,
+  cursor?: string,
+  limit = 50
+): Promise<ActionResult<{ messages: MessageItem[]; nextCursor: string | null }>> {
   try {
-    const messages = await prisma.message.findMany(
-      {
-        where: { conversation_id: conversationId },
-        orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        take: limit + 1,
-      }
-    )
+    const messages = await prisma.message.findMany({
+      where: { conversation_id: conversationId },
+      orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: limit + 1,
+    })
 
     const hasMore = messages.length > limit
     const page = messages.slice(0, limit)
@@ -203,8 +225,7 @@ export async function listMessages(conversationId: string,cursor?: string,limit 
         nextCursor: hasMore ? page.at(-1)?.id ?? null : null,
       },
     }
-  } 
-  catch (error) {
+  } catch (error) {
     return actionFailure('List messages', error instanceof Error ? error.message : 'Failed to load messages')
   }
 }
@@ -234,4 +255,3 @@ export async function addMessage(conversationId: string,content: string): Promis
   } 
   catch (error) { return actionFailure('Add message', error instanceof Error ? error.message : 'Failed to add message')}
 }
-

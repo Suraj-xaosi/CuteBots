@@ -1,6 +1,29 @@
-import { useDispatch,useStore, useSelector, type TypedUseSelectorHook } from "react-redux"
-import type { AppDispatch, RootState,AppStore } from "./store"
+import type { Dispatch } from "react"
+import { useWorkspaceContext } from "./workspace-context"
+import type { WorkspaceAction, WorkspaceUiState } from "./workspace-slice"
 
-export const useAppDispatch = useDispatch.withTypes<AppDispatch>()
-export const useAppSelector = useSelector.withTypes<RootState>()
-export const useAppStore = useStore.withTypes<AppStore>()
+export type AppDispatch = Dispatch<WorkspaceAction>
+export type RootState = WorkspaceUiState
+export type AppStore = {
+  dispatch: AppDispatch
+  getState: () => RootState
+}
+
+export function useAppSelector<T>(selector: (state: RootState) => T) {
+  const { state } = useWorkspaceContext()
+  return selector(state)
+}
+
+export function useAppDispatch(): AppDispatch {
+  const { dispatch } = useWorkspaceContext()
+  return dispatch
+}
+
+export function useAppStore(): AppStore {
+  const { state, dispatch } = useWorkspaceContext()
+
+  return {
+    dispatch,
+    getState: () => state,
+  }
+}

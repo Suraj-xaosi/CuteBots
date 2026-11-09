@@ -19,10 +19,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
-import {
-  useProjectCredentials,
-  useSaveProjectCredentials,
-} from "../../hooks/use-project-credentials"
+import { useDeleteProject } from "@/hooks/use-projects"
+import { useProjectCredentials, useSaveProjectCredentials } from "../../hooks/use-project-credentials"
+import { SandboxControls } from "./settings/sandbox-controls"
 
 type Credentials = NonNullable<ReturnType<typeof useProjectCredentials>["data"]>
 
@@ -51,7 +50,12 @@ export function SettingsDialog({
           </DialogDescription>
         </DialogHeader>
         {credentials.data ? (
-          <SettingsForm key={projectId} projectId={projectId} initial={credentials.data} />
+          <SettingsForm
+            key={projectId}
+            projectId={projectId}
+            initial={credentials.data}
+            onOpenChange={onOpenChange}
+          />
         ) : credentials.isError ? (
           <DialogDescription className="text-destructive">
             {credentials.error?.message}
@@ -59,12 +63,21 @@ export function SettingsDialog({
         ) : (
           <DialogDescription>Loading settings…</DialogDescription>
         )}
+        <SandboxControls projectId={projectId} enabled={open} />
       </DialogContent>
     </Dialog>
   )
 }
 
-function SettingsForm({ projectId, initial }: { projectId: string; initial: Credentials }) {
+function SettingsForm({
+  projectId,
+  initial,
+  onOpenChange,
+}: {
+  projectId: string
+  initial: Credentials
+  onOpenChange: (open: boolean) => void
+}) {
   const [provider, setProvider] = useState<ProviderName>(
     isProviderName(initial.provider) ? initial.provider : "openai"
   )
@@ -74,6 +87,7 @@ function SettingsForm({ projectId, initial }: { projectId: string; initial: Cred
   const tavilyKey = useRef<HTMLInputElement>(null)
   const repositoryToken = useRef<HTMLInputElement>(null)
   const save = useSaveProjectCredentials(projectId)
+  const remove = useDeleteProject()
 
   const submit = () => {
     const key = apiKey.current?.value
@@ -150,9 +164,29 @@ function SettingsForm({ projectId, initial }: { projectId: string; initial: Cred
         <DialogDescription className="text-destructive">{save.error.message}</DialogDescription>
       ) : null}
       {save.isSuccess ? <DialogDescription>Settings saved securely.</DialogDescription> : null}
-      <Button onClick={submit} disabled={save.isPending}>
-        {save.isPending ? "Saving…" : "Save settings"}
-      </Button>
+      <div className="flex items-center justify-between gap-3 pt-2">
+        <Button onClick={submit} disabled={save.isPending}>
+          {save.isPending ? "Saving…" : "Save settings"}
+        </Button>
+        <Button
+          type="button"
+          variant="destructive"
+          disabled={remove.isPending}
+          onClick={() => {
+            const confirmed = window.confirm(
+              "Delete this project and its conversations, runs, and sandbox? This cannot be undone."
+            )
+            if (!confirmed) return
+            remove.mutate(projectId, {
+              onSuccess: () => {
+                onOpenChange(false)
+              },
+            })
+          }}
+        >
+          {remove.isPending ? "Deleting…" : "Delete project"}
+        </Button>
+      </div>
     </>
   )
 }

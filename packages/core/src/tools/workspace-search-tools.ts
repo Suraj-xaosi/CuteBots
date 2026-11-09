@@ -1,24 +1,7 @@
+import { findFilesSchema, listFilesSchema, searchFilesSchema } from "@workspace/types";
 import { z } from "zod";
 import type { Sandbox } from "../sandbox.js";
 import { fromSandboxResult, Tool, type ToolResult } from "./tool.js";
-
-const listFilesSchema = z.object({
-  path: z.string().trim().max(4_096).optional().describe("Workspace directory to list; omit this or use . for the repository root"),
-}).strict();
-
-const findFilesSchema = z.object({
-  directory: z.string().trim().min(1).max(4_096).default(".").describe("Workspace directory to search"),
-  glob: z.string().trim().min(1).max(256).default("**/*").describe("Simple glob: *, **, and ? wildcards"),
-  max_results: z.number().int().min(1).max(50).default(30).describe("Maximum matching paths to return"),
-}).strict();
-
-const searchFilesSchema = z.object({
-  query: z.string().min(1).max(1_000).describe("Literal text to find; this is not a regular expression"),
-  directory: z.string().trim().min(1).max(4_096).default(".").describe("Workspace directory to search"),
-  glob: z.string().trim().min(1).max(256).default("**/*").describe("Simple glob: *, **, and ? wildcards"),
-  case_sensitive: z.boolean().default(false).describe("Whether the literal search is case sensitive"),
-  max_results: z.number().int().min(1).max(30).default(15).describe("Maximum matching lines to return"),
-}).strict();
 
 export class ListFilesTool extends Tool<typeof listFilesSchema> {
   readonly name = "list_files";

@@ -29,7 +29,10 @@ function LiveComposer({ conversationId }: { conversationId: string }) {
 
     send.mutate(content, {
       onSuccess: () => {
-        if (input.current) input.current.value = ""
+        if (input.current) {
+          input.current.value = ""
+          input.current.style.height = "auto"
+        }
         input.current?.focus()
       },
     })
@@ -72,11 +75,16 @@ function ComposerView({
         ) : null}
         <InputGroupTextarea
           ref={inputRef}
-          rows={3}
+          rows={1}
           maxLength={50_000}
           disabled={disabled}
           placeholder="Ask for a change, an explanation, or a review…"
-          className="max-h-[40dvh] resize-y"
+          className="min-h-0 max-h-[40dvh] resize-none overflow-hidden"
+          onInput={(event) => {
+            const element = event.currentTarget
+            element.style.height = "auto"
+            element.style.height = `${Math.min(element.scrollHeight, 160)}px`
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault()

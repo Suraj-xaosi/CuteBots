@@ -1,3 +1,5 @@
+"use client"
+
 import { Bot } from "lucide-react"
 import {
   Empty,
@@ -12,6 +14,7 @@ import {
   ResizablePanelGroup,
 } from "@workspace/ui/components/resizable"
 import { TooltipProvider } from "@workspace/ui/components/tooltip"
+import { AddProjectButton } from "./chat/add-project-button"
 import { ChatPanel } from "./chat/chat-panel"
 import { COLLAPSED_SIZE, PANELS } from "./layout/layout-config"
 import { ProjectGate } from "./project-gate"
@@ -67,6 +70,9 @@ function EmptyWorkspace() {
           Add a GitHub project to create its sandbox and start a conversation with your agent.
         </EmptyDescription>
       </EmptyHeader>
+      <div className="mt-6 flex justify-center">
+        <AddProjectButton />
+      </div>
     </Empty>
   )
 }

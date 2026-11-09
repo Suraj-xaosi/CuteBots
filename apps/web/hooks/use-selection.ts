@@ -1,6 +1,6 @@
 "use client"
 
-import { useConversations } from "./use-Conversations"
+import { useConversations } from "./use-conversations"
 import { useProjects } from "./use-projects"
 import { useAppSelector } from "@/store/hooks"
 import { selectActiveConversationId, selectSelectedProjectId } from "@/store/workspace-slice"

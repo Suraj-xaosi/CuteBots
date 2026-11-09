@@ -1,6 +1,6 @@
 import { END, START, StateGraph } from "@langchain/langgraph"
 import { AgentRunStatus, type LLMProvider } from "@workspace/types"
-import { redactTextSecrets } from "../security/secret-redaction.js"
+import { redactTextSecrets } from "../secret-redaction.js"
 import type { Sandbox } from "../sandbox.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
 import type {
@@ -9,6 +9,7 @@ import type {
   AgentRunPersistence,
 } from "./agent-types.js"
 import { toLLMMessage } from "./agent-loop-utils.js"
+import { repairToolHistory } from "./agent-loop-history.js"
 import { callAgentModel } from "./agent-loop-model.js"
 import {
   publishRunLog,
@@ -18,10 +19,7 @@ import {
   AgentRunGraphState,
   MAX_ITERATIONS,
 } from "./agent-loop-state.js"
-import {
-  executeAgentTools,
-  reconcileInterruptedToolCalls,
-} from "./agent-loop-tools.js"
+import { executeAgentTools } from "./agent-loop-tools.js"
 
 export class AgentLoop {
   private controller: AbortController | undefined
@@ -60,17 +58,21 @@ export class AgentLoop {
         context.conversationId
       )
       if (!loaded.ok) throw new Error(loaded.error)
-      const messages = loaded.data.map(toLLMMessage)
+      // One unreadable stored message must not brick the whole conversation:
+      // skip it, then repair any tool_call that lost its result (cancel / crash).
+      const messages = repairToolHistory(
+        loaded.data.flatMap((stored) => {
+          try {
+            return [toLLMMessage(stored)]
+          } catch (error) {
+            console.warn("Skipping unreadable stored message", { runId: context.runId, error })
+            return []
+          }
+        })
+      )
       if (!messages.some((message) => message.role === "user")) {
         throw new Error(
           "Cannot start an agent run: the conversation has no user message"
-        )
-      }
-      if (context.resume) {
-        await reconcileInterruptedToolCalls(
-          context,
-          messages,
-          this.persistence
         )
       }
 
@@ -91,18 +93,20 @@ export class AgentLoop {
       commandCleanupComplete = true
 
       if (this.controller.signal.aborted) {
-        await setRunStatus(
-          this.persistence,
-          context.runId,
-          AgentRunStatus.INTERRUPTED,
-          "Agent run interrupted"
-        )
+        // Final log FIRST, terminal status LAST: when a viewer sees "finished",
+        // every log is already saved and delivered.
         await publishRunLog(
           this.persistence,
           this.channel,
           context.runId,
           "status",
           "Agent run interrupted; conversation history is preserved"
+        ).catch(() => undefined)
+        await setRunStatus(
+          this.persistence,
+          context.runId,
+          AgentRunStatus.INTERRUPTED,
+          "Agent run interrupted"
         )
         return
       }
@@ -123,14 +127,14 @@ export class AgentLoop {
         summary
       )
       if (!savedSummary.ok) throw new Error(savedSummary.error)
-      await setRunStatus(this.persistence, context.runId, AgentRunStatus.DONE)
       await publishRunLog(
         this.persistence,
         this.channel,
         context.runId,
         "status",
         "Agent run completed"
-      )
+      ).catch(() => undefined)
+      await setRunStatus(this.persistence, context.runId, AgentRunStatus.DONE)
     } catch (error) {
       let reason = error instanceof Error ? error.message : "Agent run failed"
       if (!commandCleanupComplete) {
@@ -153,14 +157,14 @@ export class AgentLoop {
       const status = this.controller.signal.aborted
         ? AgentRunStatus.INTERRUPTED
         : AgentRunStatus.FAILED
-      await setRunStatus(this.persistence, context.runId, status, reason)
       await publishRunLog(
         this.persistence,
         this.channel,
         context.runId,
         status === AgentRunStatus.INTERRUPTED ? "status" : "error",
         reason
-      )
+      ).catch(() => undefined)
+      await setRunStatus(this.persistence, context.runId, status, reason)
     } finally {
       this.controller = undefined
       this.activeRunId = undefined

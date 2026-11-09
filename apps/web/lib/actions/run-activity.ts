@@ -9,7 +9,8 @@ export async function getRunActivity(runId: string): Promise<ActionResult<Activi
   try {
     const logs = await prisma.agentLog.findMany(
       {
-        where: { run_id: runId },
+        // Token fragments would push real events (tool calls, errors) out of the last 100.
+        where: { run_id: runId, type: { not: 'assistant_delta' } },
         orderBy: { id: 'desc' },
         take: 100,
       }

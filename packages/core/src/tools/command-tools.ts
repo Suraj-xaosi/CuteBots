@@ -1,14 +1,7 @@
+import { commandJobSchema, commandSchema } from "@workspace/types";
 import { z } from "zod";
 import type { CommandJobSnapshot, Sandbox } from "../sandbox.js";
 import { Tool, type ToolResult } from "./tool.js";
-
-const commandSchema = z.object({
-  command: z.string().trim().min(1).max(20_000).describe("Shell command to run inside the project sandbox"),
-}).strict();
-
-const commandJobSchema = z.object({
-  job_id: z.string().uuid().describe("Opaque ID returned by run_command"),
-}).strict();
 
 export class RunCommandTool extends Tool<typeof commandSchema> {
   readonly name = "run_command";

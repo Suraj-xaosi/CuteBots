@@ -10,7 +10,7 @@ import {
 // The stream and the mutations both use these, so there is one definition of
 // "what a live event does to the cache".
 
-const MAX_ACTIVITIES = 500
+const MAX_ACTIVITY_ITEMS = 500
 
 // Idempotent: the same event twice (reconnect replay) changes nothing.
 export function appendActivity(
@@ -19,7 +19,7 @@ export function appendActivity(
 ): ActivityItem[] {
   const current = list ?? []
   if (current.some((existing) => existing.id === item.id)) return current
-  return [...current, item].slice(-MAX_ACTIVITIES)
+  return [...current, item].slice(-MAX_ACTIVITY_ITEMS)
 }
 
 export function withRunPatch(
@@ -29,7 +29,9 @@ export function withRunPatch(
 ): ConversationDetails {
   return {
     ...conversation,
-    runs: conversation.runs.map((run) => (run.id === runId ? { ...run, ...patch } : run)),
+    runs: conversation.runs.map((run) =>
+      run.id === runId ? { ...run, ...patch } : run
+    ),
   }
 }
 
@@ -41,13 +43,20 @@ export function withAssistantMessage(
   item: ActivityItem
 ): ConversationDetails {
   const id = `live-${item.id}`
-  if (conversation.messages.some((message) => message.id === id)) return conversation
+  if (conversation.messages.some((message) => message.id === id))
+    return conversation
 
   return {
     ...conversation,
     messages: [
       ...conversation.messages,
-      { id, role: "assistant", content: item.content, runId, createdAt: item.createdAt },
+      {
+        id,
+        role: "assistant",
+        content: item.content,
+        runId,
+        createdAt: item.createdAt,
+      },
     ],
   }
 }
@@ -58,6 +67,7 @@ export function statusFromEventContent(content: string): AgentRunStatusValue {
   const text = content.toLowerCase()
   if (text.includes("waiting")) return AgentRunStatus.WAITING_FOR_INPUT
   if (text.includes("completed")) return AgentRunStatus.DONE
-  if (text.includes("interrupted") || text.includes("cancelled")) return AgentRunStatus.INTERRUPTED
+  if (text.includes("interrupted") || text.includes("cancelled"))
+    return AgentRunStatus.INTERRUPTED
   return AgentRunStatus.RUNNING
 }

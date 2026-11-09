@@ -6,7 +6,6 @@ import {
   ErrorCode,
   ProjectProvisionStatus,
   SandboxStatus,
-  isTerminalAgentRunStatus,
   type ActionResult,
   type ProjectFileEntry,
   type ProjectFilePreview,
@@ -18,6 +17,7 @@ import { containers } from '../agent-runtime'
 import { provisionSandbox } from '../sandbox-service'
 import { actionFailure } from '../action-utils'
 import { cancelRun } from './runs'
+import { forceFinishRun, waitForRunToFinish } from '../run-control'
 
 const projectIdSchema = z.string().trim().min(1)
 const pathSchema = z.string().trim().min(1).max(4_096)
@@ -28,12 +28,11 @@ const STOP_WAIT_FOR_RUN_MS = 5_000
 
 
 
-// ---------------------------------------------------------------------------
-// Private helpers.
-// IMPORTANT: a 'use server' file turns every EXPORTED function into a public
-// endpoint. These stay un-exported on purpose (the old exported openSandbox
-// tried to send a live Sandbox object to the browser).
-// ---------------------------------------------------------------------------
+
+//  helpers ------------------------------------------------
+
+
+
 
 // Find the sandbox in memory, or re-attach after a server restart.
 async function attachSandbox(projectId: string): Promise<Result<Sandbox>> {
@@ -45,6 +44,10 @@ async function attachSandbox(projectId: string): Promise<Result<Sandbox>> {
 
   return { ok: false, error: 'Sandbox is not available', code: ErrorCode.CONTAINER_NOT_FOUND }
 }
+
+
+
+
 
 // For READ actions: they must never change lifecycle state.
 // A sandbox the user stopped stays stopped; we do not silently restart it.
@@ -60,32 +63,11 @@ async function requireRunningSandbox(projectId: string): Promise<Result<Sandbox>
   return attachSandbox(projectId)
 }
 
-async function waitForRunToFinish(runId: string, timeoutMs: number) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const run = await prisma.agentRun.findUnique({ where: { id: runId }, select: { status: true } })
-    if (!run || isTerminalAgentRunStatus(run.status)) return
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-}
+
+
 
 
 type Blocker = { error: string; code: ErrorCode } | null
-
-// Hard-stop guarantee: whatever the agent loop is doing, after this the run is
-// terminal and the project is free (no zombie run, no stuck active_run_id).
-async function forceFinishRun(runId: string, projectId: string) {
-  await prisma.$transaction([
-    prisma.agentRun.updateMany({
-      where: { id: runId, status: { notIn: ['DONE', 'FAILED', 'INTERRUPTED'] } },
-      data: { status: 'INTERRUPTED', fail_reason: 'Run stopped by user', completed_at: new Date() },
-    }),
-    prisma.project.updateMany({
-      where: { id: projectId, active_run_id: runId },
-      data: { active_run_id: null },
-    }),
-  ])
-}
 
 // Shared gate for Stop and Destroy.
 //  - setup in progress      -> refuse
@@ -114,6 +96,10 @@ async function resolveActiveRun(
   await forceFinishRun(runId, project.id)
   return null
 }
+
+
+
+//-----------------------------------------------helpers end
 
 
 
@@ -171,6 +157,8 @@ export async function getSandboxStatus(projectId: string): Promise<ActionResult<
 
 
 
+
+
 export async function startSandbox(
   projectId: string
 ): Promise<ActionResult<{ status: string; provisionStatus: string }>> {
@@ -191,6 +179,9 @@ export async function startSandbox(
     },
   }
 }
+
+
+
 
 
 
@@ -231,6 +222,8 @@ export async function stopSandbox(
     return actionFailure('Stop sandbox', error instanceof Error ? error.message : 'Unable to stop sandbox')
   }
 }
+
+
 
 
 
@@ -289,6 +282,7 @@ export async function destroySandbox(
 
 
 
+
 export async function listProjectFiles(
   projectId: string,
   directory = '.'
@@ -316,7 +310,7 @@ export async function listProjectFiles(
       .filter((entry) => !HIDDEN_ENTRIES.has(entry.name))
       .map((entry): ProjectFileEntry => {
         const type: ProjectFileEntry['type'] =
-          entry.kind === 'directory' ? 'directory' : entry.kind === 'symlink' ? 'symlink' : 'file'
+          entry.kind === 'directory' ? 'directory' : entry.kind === 'symlink' ? 'symlink' : 'file';
 
         return {
           name: entry.name,
@@ -336,6 +330,7 @@ export async function listProjectFiles(
     return actionFailure('List project files', error instanceof Error ? error.message : 'Unable to list project files')
   }
 }
+
 
 
 

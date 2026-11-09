@@ -20,6 +20,9 @@ const globalForProvision = globalThis as unknown as {
 }
 const inflight = (globalForProvision.__cutebotsProvisionInflight ??= new Map())
 
+
+
+
 export function provisionSandbox(projectId: string): Promise<ProvisionResult> {
   const parsed = projectIdSchema.safeParse(projectId)
   if (!parsed.success) {
@@ -39,11 +42,19 @@ export function provisionSandbox(projectId: string): Promise<ProvisionResult> {
   return work
 }
 
+
+
+
 async function doProvision(projectId: string): Promise<ProvisionResult> {
   try {
     const project = await prisma.project.findUnique({ where: { id: projectId } })
     if (!project) {
       return { ok: false, error: 'Project not found', code: ErrorCode.TASK_NOT_FOUND }
+    }
+
+    // A delete/destroy is in progress: do not race it and create a container nobody will own.
+    if (project.sandbox_status === 'DESTROYING') {
+      return { ok: false, error: 'The sandbox is being deleted. Try again in a moment.', code: ErrorCode.CONTAINER_NOT_FOUND }
     }
 
     // From here on, EVERY exit path must leave a terminal status (READY or FAILED).
@@ -124,6 +135,9 @@ async function doProvision(projectId: string): Promise<ProvisionResult> {
   }
 }
 
+
+
+
 // Single place that writes FAILED. Never throws (the project row may be gone).
 async function failProvision(
   projectId: string,
@@ -133,16 +147,15 @@ async function failProvision(
   const message = redactTextSecrets(error).slice(0, 2_000)
   const sandbox = containers.get(projectId)
 
-  await prisma.project
-    .update({
-      where: { id: projectId },
-      data: {
-        provision_status: 'FAILED',
-        provision_error: message,
-        sandbox_status: sandbox.ok ? 'RUNNING' : 'STOPPED',
-        container_id: sandbox.ok ? sandbox.data.getId() : null,
-      },
-    })
+  await prisma.project.update({
+    where: { id: projectId },
+    data: {
+      provision_status: 'FAILED',
+      provision_error: message,
+      sandbox_status: sandbox.ok ? 'RUNNING' : 'STOPPED',
+      container_id: sandbox.ok ? sandbox.data.getId() : null,
+    },
+  })
     .catch((updateError) => {
       console.error('Unable to record provision failure', { projectId, updateError })
     })

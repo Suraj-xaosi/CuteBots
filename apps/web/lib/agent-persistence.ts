@@ -28,7 +28,8 @@ export const persistence: AgentRunPersistence = {
     try {
       const messages = await prisma.message.findMany({
         where: { conversation_id: conversationId },
-        orderBy: { created_at: 'asc' },
+        // id as tie-breaker: two messages in the same millisecond must keep their order.
+        orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
       })
 
       return {
@@ -92,22 +93,42 @@ export const persistence: AgentRunPersistence = {
 
   async updateRunStatus(id, status, failReason) {
     try {
-      const run = await prisma.agentRun.update({
+      const current = await prisma.agentRun.findUnique({
         where: { id },
+        select: { started_at: true, conversation: { select: { project_id: true } } },
+      })
+      if (!current) {
+        return { ok: false, error: 'Run not found', code: ErrorCode.TASK_NOT_FOUND }
+      }
+
+      // Compare-and-set: a finished run is FINAL. A late DONE can no longer
+      // overwrite INTERRUPTED (cancel / hard stop), and vice versa.
+      // started_at is written once, not every time WAITING_FOR_INPUT -> RUNNING.
+      await prisma.agentRun.updateMany({
+        where: {
+          id,
+          status: { notIn: [DbRunStatus.DONE, DbRunStatus.FAILED, DbRunStatus.INTERRUPTED] },
+        },
         data: {
           status: runStatus[status],
           fail_reason: failReason ? redactTextSecrets(failReason) : null,
-          ...(status === AgentRunStatus.RUNNING ? { started_at: new Date() } : {}),
+          ...(status === AgentRunStatus.RUNNING && !current.started_at ? { started_at: new Date() } : {}),
           ...(isTerminalAgentRunStatus(status) ? { completed_at: new Date() } : {}),
         },
-        select: { conversation: { select: { project_id: true } } },
       })
 
+      // Always release the project lock on a terminal status (safe to repeat).
       if (isTerminalAgentRunStatus(status)) {
         await prisma.project.updateMany({
-          where: { id: run.conversation.project_id, active_run_id: id },
+          where: { id: current.conversation.project_id, active_run_id: id },
           data: { active_run_id: null },
         })
+
+        // Live token fragments only matter while the run is streaming; the final text
+        // is stored in Message. Without this, every run leaves thousands of rows behind.
+        await prisma.agentLog
+          .deleteMany({ where: { run_id: id, type: 'assistant_delta' } })
+          .catch(() => null)
       }
 
       return { ok: true, data: undefined }

@@ -4,10 +4,7 @@ import {
 } from "@workspace/types"
 import type { Sandbox } from "../sandbox.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
-import {
-  redactStructuredSecrets,
-  redactTextSecrets,
-} from "../security/secret-redaction.js"
+import { redactTextSecrets } from "../secret-redaction.js"
 import type {
   AgentChannel,
   AgentRunContext,
@@ -19,6 +16,7 @@ import {
   setRunStatus,
 } from "./agent-loop-persistence.js"
 import type { AgentRunGraphStateType } from "./agent-loop-state.js"
+import { truncateToolOutput } from "./agent-loop-history.js"
 
 type ToolDependencies = {
   tools: ToolRegistry
@@ -46,9 +44,7 @@ export async function executeAgentTools(
       channel,
       context.runId,
       "tool_call",
-      `${toolCall.name} ${JSON.stringify(
-        redactStructuredSecrets(toolCall.arguments)
-      )}`
+      `${toolCall.name} ${JSON.stringify(toolCall.arguments)}`
     )
 
     const isWaitingForUser = toolCall.name === "ask_human"
@@ -99,7 +95,8 @@ export async function executeAgentTools(
       )
     }
 
-    const safeOutput = redactTextSecrets(result.output)
+    // Redact first (a secret could straddle the cut), then cap the size.
+    const safeOutput = truncateToolOutput(redactTextSecrets(result.output))
     const toolMessage: LLMMessage = {
       role: "tool",
       tool_call_id: toolCall.id,
@@ -116,46 +113,4 @@ export async function executeAgentTools(
     )
   }
   return { messages, response: null }
-}
-
-export async function reconcileInterruptedToolCalls(
-  context: AgentRunContext,
-  messages: LLMMessage[],
-  persistence: AgentRunPersistence
-) {
-  let assistantIndex = -1
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]
-    if (message?.role === "assistant" && message.tool_calls?.length) {
-      assistantIndex = index
-      break
-    }
-  }
-  if (assistantIndex < 0) return
-
-  const tail = messages.slice(assistantIndex + 1)
-  if (tail.some((message) => message.role !== "tool")) return
-  const completedCalls = new Set(
-    tail.filter((message) => message.role === "tool").map((message) => message.tool_call_id)
-  )
-  const assistantMessage = messages[assistantIndex]
-  if (
-    !assistantMessage ||
-    assistantMessage.role !== "assistant" ||
-    !assistantMessage.tool_calls
-  ) {
-    return
-  }
-
-  for (const call of assistantMessage.tool_calls) {
-    if (completedCalls.has(call.id)) continue
-    const interruptedResult: LLMMessage = {
-      role: "tool",
-      tool_call_id: call.id,
-      content:
-        "This tool call was interrupted. Reassess whether it completed before continuing.",
-    }
-    await saveRunMessage(persistence, context, interruptedResult)
-    messages.push(interruptedResult)
-  }
 }

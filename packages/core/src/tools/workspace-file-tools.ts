@@ -1,19 +1,7 @@
+import { pathSchema, strReplaceSchema, writeFileSchema } from "@workspace/types";
 import { z } from "zod";
 import type { Sandbox } from "../sandbox.js";
 import { fromSandboxResult, Tool, type ToolResult } from "./tool.js";
-
-const pathSchema = z.object({
-  path: z.string().trim().min(1).max(4_096).describe("Path inside the project workspace"),
-}).strict();
-
-const writeFileSchema = pathSchema.extend({
-  content: z.string().describe("UTF-8 file contents"),
-}).strict();
-
-const strReplaceSchema = pathSchema.extend({
-  oldText: z.string().min(1).describe("Exact existing text that must occur exactly once"),
-  newText: z.string().describe("Replacement text"),
-}).strict();
 
 export class WriteFileTool extends Tool<typeof writeFileSchema> {
   readonly name = "write_file";

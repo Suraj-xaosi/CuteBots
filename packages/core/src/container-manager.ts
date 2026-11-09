@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ErrorCode, type Result } from "@workspace/types";
 import { commandError, runDocker } from "./docker.js";
 import { Sandbox } from "./sandbox.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const IMAGE_BUILD_TIMEOUT_MS = 10 * 60 * 1_000;
 
 export class ContainerManager {
@@ -132,7 +134,7 @@ export class ContainerManager {
   }
 
   private async buildSandboxImage(imageName: string): Promise<Result<void>> {
-    const repositoryRoot = resolve(import.meta.dirname, "../../..");
+    const repositoryRoot = resolve(__dirname, "../../..");
     const dockerfile = resolve(repositoryRoot, "infra", "Dockerfile.sandbox-base");
     if (!existsSync(dockerfile)) {
       return this.failure(`Sandbox image is missing and its Dockerfile was not found: ${dockerfile}`);

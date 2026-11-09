@@ -11,11 +11,12 @@ import { MessageBubble } from "./message-bubble"
 export function MessageList({ conversationId }: { conversationId: string | null }) {
   const conversation = useConversation(conversationId)
   const messages = conversation.data?.messages
+  const visibleMessages = (messages ?? []).filter((message) => message.role !== "tool")
 
-  if (messages?.length) {
+  if (visibleMessages.length) {
     return (
       <ul className="mx-auto grid w-full max-w-3xl grid-cols-[minmax(0,1fr)] gap-4 p-4 md:p-6">
-        {messages.map((message) => (
+        {visibleMessages.map((message) => (
           <li key={message.id} className="flex min-w-0">
             <MessageBubble message={message} />
           </li>

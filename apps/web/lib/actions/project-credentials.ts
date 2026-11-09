@@ -1,7 +1,7 @@
 ﻿'use server'
 
 import { prisma } from '@workspace/db'
-import { ErrorCode, type ActionResult, type ProjectCredentialsView } from '@workspace/types'
+import { ErrorCode, type ActionResult, type ProjectCredentialsView, providerSchema } from '@workspace/types'
 import { z } from 'zod'
 import {
   credentialsProblem,
@@ -11,7 +11,6 @@ import {
   writeProjectCredentials,
 } from '../credentials'
 import { actionFailure } from '../action-utils'
-import { providerSchema } from '../safe'
 
 // Tri-state fields:
 //   undefined -> leave as is

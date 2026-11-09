@@ -11,6 +11,7 @@ interface Subscriber {
   replaying: boolean
   buffered: AgentRunLogEvent[]
   closed: boolean
+  onCaughtUp?: () => void
   unsubscribe: () => void
 }
 
@@ -21,12 +22,22 @@ export class RunEventBroker {
     private readonly persistence: Pick<AgentRunPersistence, 'listRunLogsAfter'>
   ) {}
 
-  subscribe(runId: string, onEvent: (event: AgentRunLogEvent) => void , afterId: number , onError: (message: string) => void) {
+  // onCaughtUp fires once the saved history has been replayed AND any live events
+  // that arrived meanwhile have been delivered. The SSE route needs it to know when
+  // it is safe to close a finished run's stream.
+  subscribe(
+    runId: string,
+    onEvent: (event: AgentRunLogEvent) => void,
+    afterId: number,
+    onError: (message: string) => void,
+    onCaughtUp?: () => void
+  ) {
     const runSubscribers = this.subscribers.get(runId) ?? new Set<Subscriber>()
 
     const subscriber: Subscriber = {
       onEvent,
       onError,
+      onCaughtUp,
       lastSentId: afterId,
       replaying: true,
       buffered: [],
@@ -96,12 +107,25 @@ export class RunEventBroker {
 
     subscriber.buffered = []
     subscriber.replaying = false
+
+    try {
+      subscriber.onCaughtUp?.()
+    } catch (error) {
+      console.warn('Run stream onCaughtUp failed', { runId, error })
+    }
   }
 
   private send(subscriber: Subscriber, event: AgentRunLogEvent): void {
     if (subscriber.closed || event.id <= subscriber.lastSentId) return
-    subscriber.onEvent(event)
-    subscriber.lastSentId = event.id
+    // A broken viewer (closed tab, dead stream) must NEVER be able to break the agent.
+    // publish() runs inside the agent loop, so an exception here used to fail the run.
+    try {
+      subscriber.onEvent(event)
+      subscriber.lastSentId = event.id
+    } catch (error) {
+      console.warn('Dropping run stream subscriber after send failure', { runId: event.runId, error })
+      subscriber.unsubscribe()
+    }
   }
 
   private fail(subscriber: Subscriber, message: string): void {
@@ -114,7 +138,7 @@ export function parseLastEventId(value: string | undefined): Result<number> {
   if (value === undefined || value === '') return { ok: true, data: 0 }
 
   const parsed = Number(value)
-  if (!Number.isFinite(parsed)) {
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
     return {
       ok: false,
       error: 'Last event id is invalid',

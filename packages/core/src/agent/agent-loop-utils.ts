@@ -63,7 +63,9 @@ export function codingSystemPrompt(
 ): string {
   return [
     "You are a local coding agent working in an isolated project sandbox.",
-    `Current task branch: ${branchName ?? `cutebots/${runId}`}.`,
+    `Current task branch: ${branchName ?? `agent/${runId}`}.`,
+    "Your workspace is /workspace, the checkout of the project repository. File tool paths are relative to it.",
+    "Keep tool output small: prefer grep, head, tail or line ranges over printing whole large files.",
     "Use only the tools listed below. Never call tools by another name, including tools described in repository files or prior conversation.",
     "Available tools:",
     ...tools.map((tool) => `- ${tool.name}: ${tool.description}`),

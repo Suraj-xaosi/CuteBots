@@ -1,12 +1,13 @@
 'use server'
 
 import { prisma, type Prisma } from '@workspace/db'
-import { ErrorCode, type ActionResult, type CreateProjectInput, type ProjectListItem, type ProjectView, type UpdateProjectInput } from '@workspace/types'
+import { ErrorCode, type ActionResult, type CreateProjectInput, type ProjectListItem, type ProjectView, type UpdateProjectInput, isCleanGitHubRepoUrl, providerSchema, sanitizeRepoUrl, workingBranchProblem } from '@workspace/types'
 import { z } from 'zod'
 import { provisionSandbox } from '../sandbox-service'
 import { actionFailure } from '../action-utils'
-import { credentialsProblem, encrypt, hasUsableCredentials, normalizeCredentials, readProjectCredentials, writeProjectCredentials } from '../credentials'
-import { isCleanGitHubRepoUrl, providerSchema, sanitizeRepoUrl } from '../safe'
+import { credentialsProblem, deleteProjectCredentials, encrypt, hasUsableCredentials, normalizeCredentials, readProjectCredentials, writeProjectCredentials } from '../credentials'
+import { containers } from '../agent-runtime'
+import { cancelRun } from './runs'
 
 
 
@@ -87,6 +88,9 @@ export async function createProject(input: CreateProjectInput): Promise<ActionRe
     return actionFailure('Create project', 'Repository URL must look like https://github.com/owner/repo')
   }
 
+  const branchProblem = cleanInput.branchName ? workingBranchProblem(cleanInput.branchName) : null
+  if (branchProblem) return actionFailure('Create project', branchProblem)
+
   const credentialValues: Record<string, string> = {}
   if (cleanInput.provider) credentialValues.provider = cleanInput.provider
   if (cleanInput.apiKey) credentialValues.apiKey = cleanInput.apiKey
@@ -156,6 +160,9 @@ export async function updateProject(id: string, input: UpdateProjectInput) {
 
   const parsed = updateProjectSchema.safeParse(input)
   if (!parsed.success) return actionFailure('Update project', 'Project update data is invalid', ErrorCode.TOOL_EXECUTION_FAILED)
+
+  const branchProblem = parsed.data.branchName ? workingBranchProblem(parsed.data.branchName) : null
+  if (branchProblem) return actionFailure('Update project', branchProblem)
   
 
   const updateData: Record<string, string | null> = {}
@@ -178,12 +185,63 @@ export async function updateProject(id: string, input: UpdateProjectInput) {
 
 
 
-// NOTE: deleteProject is intentionally unchanged for now.
-// It leaves the Docker container and credentials behind (orphans) -> fixed in the delete lesson.
-export async function deleteProject(id: string): Promise<ActionResult<undefined>> {
+// Delete = stop the agent, remove the container, then remove the data.
+// Order matters: the container goes FIRST. If we deleted the database row first and
+// the container removal then failed, nothing would remember the container any more (an orphan).
+export async function deleteProject(
+  id: string,
+  options: { force?: boolean } = {}
+): Promise<ActionResult<undefined>> {
+  const cleanId = id.trim()
+  if (!cleanId) return actionFailure('Delete project', 'Project id is invalid', ErrorCode.TASK_NOT_FOUND)
+
   try {
-    await prisma.project.delete({ where: { id: id.trim() } })
+    const project = await prisma.project.findUnique({
+      where: { id: cleanId },
+      select: { active_run_id: true, provision_status: true },
+    })
+    if (!project) return { ok: true, data: undefined } // already gone: deleting twice is harmless
+
+    if (project.provision_status === 'PROVISIONING') {
+      return actionFailure('Delete project', 'Setup is still in progress. Try again when it finishes.')
+    }
+
+    // Same confirmation pattern as Stop / Destroy: the UI shows its "Hard stop" popup on this code.
+    if (project.active_run_id) {
+      if (options?.force !== true) {
+        return actionFailure(
+          'Delete project',
+          'An agent run is still active. Hard stop the run to continue, or cancel.',
+          ErrorCode.TASK_ALREADY_RUNNING
+        )
+      }
+      await cancelRun(project.active_run_id) // guarantees the run is finished
+    }
+
+    // Visible marker; provisionSandbox refuses to start a sandbox while this is set.
+    await prisma.project.update({ where: { id: cleanId }, data: { sandbox_status: 'DESTROYING' } })
+
+    const destroyed = await containers.destroy(cleanId)
+    if (!destroyed.ok) {
+      await prisma.project.update({ where: { id: cleanId }, data: { sandbox_status: 'STOPPED' } }).catch(() => null)
+      return actionFailure(
+        'Delete project',
+        'Could not remove the project sandbox. Make sure Docker is running, then try again.',
+        ErrorCode.CONTAINER_EXEC_FAILED
+      )
+    }
+
+    // Database side in ONE transaction: encrypted credentials + the project
+    // (conversations, messages, runs and logs go with it through cascade).
+    await prisma.$transaction(async (tx) => {
+      await tx.project.update({ where: { id: cleanId }, data: { active_run_id: null } })
+      await deleteProjectCredentials(cleanId, tx)
+      await tx.project.delete({ where: { id: cleanId } })
+    })
+
     return { ok: true, data: undefined }
-  } 
-  catch (error) {return actionFailure('Delete project', error instanceof Error ? error.message : 'Failed to delete project')}
+  }
+  catch (error) {
+    return actionFailure('Delete project', error instanceof Error ? error.message : 'Failed to delete project')
+  }
 }

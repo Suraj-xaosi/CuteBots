@@ -1,10 +1,7 @@
+import { searchSchema } from "@workspace/types";
 import { z } from "zod";
 import type { Sandbox } from "../sandbox.js";
 import { Tool, type ToolResult } from "./tool.js";
-
-const searchSchema = z.object({
-  query: z.string().trim().min(1).max(500).describe("A focused web search query"),
-}).strict();
 
 const MAX_RESULTS = 5;
 const MAX_CONTENT_LENGTH = 1_200;

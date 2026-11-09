@@ -21,7 +21,7 @@ export function useProjectFiles(projectId: string, open: boolean) {
 
   const needle = filter.toLowerCase()
   const entries = listing.data?.entries ?? []
-  const filtered = entries.filter((entry:any) => entry.name.toLowerCase().includes(needle))
+  const filtered = entries.filter((entry) => entry.name.toLowerCase().includes(needle))
 
   const openDirectory = (path: string) => {
     setDirectory(path)

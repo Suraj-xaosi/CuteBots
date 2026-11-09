@@ -1,8 +1,5 @@
 import type { AgentRunStatus, LLMMessage } from "@workspace/types"
-import {
-  redactStructuredSecrets,
-  redactTextSecrets,
-} from "../security/secret-redaction.js"
+import { redactTextSecrets } from "../secret-redaction.js"
 import type {
   AgentChannel,
   AgentRunContext,
@@ -44,9 +41,7 @@ export async function saveRunMessage(
     content: redactTextSecrets(message.content),
     ...(message.role === "assistant" && message.tool_calls?.length
       ? {
-          toolCallsJson: JSON.stringify(
-            redactStructuredSecrets(message.tool_calls)
-          ),
+          toolCallsJson: JSON.stringify(message.tool_calls),
         }
       : {}),
     ...(message.role === "tool" ? { toolCallId: message.tool_call_id } : {}),

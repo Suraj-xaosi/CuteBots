@@ -2,7 +2,7 @@ import 'server-only'
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { prisma } from '@workspace/db'
-import { parseJsonRecord } from './safe'
+import { parseJsonRecord } from '@workspace/types'
 
 // Lets callers pass either the global client or a transaction client (tx).
 type Db = Pick<typeof prisma, 'setting'>
@@ -18,6 +18,12 @@ function encryptionKey() {
   }
 
   return decoded
+}
+
+// Called at boot. Without a valid key every credential read silently returns null,
+// which looks like "you have not saved credentials" instead of "server is misconfigured".
+export function assertCredentialsConfigured() {
+  encryptionKey()
 }
 
 export function encrypt(text: string) {

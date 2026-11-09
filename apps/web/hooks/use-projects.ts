@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { CreateProjectInput } from "@workspace/types"
-import { createProject } from "@/lib/actions/projects"
+import { createProject, deleteProject } from "@/lib/actions/projects"
 import { projectsQuery } from "./queries"
 import { unwrap } from "./unwrap"
 import { useAppDispatch } from "@/store/hooks"
@@ -10,6 +10,20 @@ import { workspaceActions } from "@/store/workspace-slice"
 
 export function useProjects() {
   return useQuery(projectsQuery())
+}
+
+export function useDeleteProject() {
+  const queryClient = useQueryClient()
+  const dispatch = useAppDispatch()
+
+  return useMutation({
+    mutationFn: (projectId: string) => unwrap(deleteProject(projectId, { force: true })),
+    onSuccess: async (_, projectId) => {
+      await queryClient.invalidateQueries({ queryKey: projectsQuery().queryKey })
+      dispatch(workspaceActions.projectCleared())
+      queryClient.removeQueries({ queryKey: ["conversations", projectId] })
+    },
+  })
 }
 
 // Resolves to { id, setupError? }. The dialog decides what to show for

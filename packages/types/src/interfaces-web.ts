@@ -5,7 +5,7 @@ import type {
   SandboxStatusValue,
 } from "./types-status-agent-and-sandbox.js";
 import type { AgentRunLogType } from "./interfaces-agentlog.js";
-import { isProviderName, type ProviderName } from "./interfaces-llm.js";
+import type { ProviderName } from "./interfaces-llm.js";
 import type { ErrorCode } from "./types-result-errorcode.js";
 
 export type ActionResult<T> =
@@ -49,36 +49,6 @@ export interface UpdateProjectInput {
   branchName?: string | null;
   context?: string;
 }
-/*
-export interface SaveProjectCredentialsInput {
-  provider?: ProviderName;
-  apiKey?: string;
-  model?: string;
-  baseUrl?: string;
-  tavilyApiKey?: string;
-  repositoryToken?: string;
-}
-
-export function isSaveProjectCredentialsInput(
-  value: unknown
-): value is SaveProjectCredentialsInput {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-
-  const input = value as Record<string, unknown>;
-  return (
-    (input.provider === undefined || isProviderName(input.provider)) &&
-    [
-      "apiKey",
-      "model",
-      "baseUrl",
-      "tavilyApiKey",
-      "repositoryToken",
-    ].every((key) => input[key] === undefined || typeof input[key] === "string")
-  );
-}
-*/
 export interface ProjectCredentialsView {
   provider: ProviderName | "";
   model: string;
@@ -114,6 +84,11 @@ export interface RunItem {
   createdAt: Date;
   startedAt?: Date | null;
   completedAt?: Date | null;
+}
+
+export interface RunDetails extends RunItem {
+  conversationId: string;
+  lastEventId: number;
 }
 
 export interface ActivityItem {

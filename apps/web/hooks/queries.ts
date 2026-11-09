@@ -3,7 +3,11 @@ import { listConversations, getConversation } from "@/lib/actions/conversations"
 import { listProjects } from "@/lib/actions/projects"
 import { getProjectCredentials } from "@/lib/actions/project-credentials"
 import { getRunActivity } from "@/lib/actions/run-activity"
-import { listProjectFiles, readProjectFile } from "@/lib/actions/sandbox"
+import {
+  getSandboxStatus,
+  listProjectFiles,
+  readProjectFile,
+} from "@/lib/actions/sandbox"
 import { queryKeys } from "./query-keys"
 import { unwrap } from "./unwrap"
 
@@ -23,13 +27,19 @@ export const projectsQuery = () =>
 export const conversationsQuery = (projectId: string | null) =>
   queryOptions({
     queryKey: queryKeys.conversations(projectId),
-    queryFn: projectId === null ? skipToken : () => unwrap(listConversations(projectId)),
+    queryFn:
+      projectId === null
+        ? skipToken
+        : () => unwrap(listConversations(projectId)),
   })
 
 export const conversationQuery = (conversationId: string | null) =>
   queryOptions({
     queryKey: queryKeys.conversation(conversationId),
-    queryFn: conversationId === null ? skipToken : () => unwrap(getConversation(conversationId)),
+    queryFn:
+      conversationId === null
+        ? skipToken
+        : () => unwrap(getConversation(conversationId)),
   })
 
 // staleTime Infinity: once loaded, only the stream (and explicit reconnect)
@@ -52,7 +62,10 @@ export const projectDirectoryQuery = (projectId: string, path: string) =>
 export const projectFileQuery = (projectId: string, path: string | null) =>
   queryOptions({
     queryKey: queryKeys.projectFile(projectId, path),
-    queryFn: path === null ? skipToken : () => unwrap(readProjectFile(projectId, path)),
+    queryFn:
+      path === null
+        ? skipToken
+        : () => unwrap(readProjectFile(projectId, path)),
     staleTime: 0,
   })
 
@@ -60,5 +73,12 @@ export const projectCredentialsQuery = (projectId: string) =>
   queryOptions({
     queryKey: queryKeys.projectCredentials(projectId),
     queryFn: () => unwrap(getProjectCredentials(projectId)),
+    staleTime: 0,
+  })
+
+export const sandboxStatusQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: queryKeys.sandboxStatus(projectId),
+    queryFn: () => unwrap(getSandboxStatus(projectId)),
     staleTime: 0,
   })
