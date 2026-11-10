@@ -1,6 +1,6 @@
 # CuteBots
 
-CuteBots is a self-hosted coding assistant. It lets you connect a project, chat with an AI agent, and have the agent work with the project's files in an isolated sandbox.
+CuteBots is a local coding agent app. It lets you connect a project, chat with an AI agent, and have the agent work with the project's files in an isolated sandbox (docker container which will be run locally on pc).
 
 ## Architecture
 
