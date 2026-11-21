@@ -61,12 +61,16 @@ export interface AgentRunPersistence {
   appendConversationMessage(
     message: StoredConversationMessage,
   ): Promise<Result<void>>;
-  /** Persists a run state transition and an optional failure reason. */
+  /**
+   * Persists a run state transition and an optional failure reason.
+   * `applied` is false when the run was already finished (a finished run is
+   * final), so the status was NOT changed.
+   */
   updateRunStatus(
     runId: string,
     status: AgentRunStatus,
     failReason?: string,
-  ): Promise<Result<void>>;
+  ): Promise<Result<{ applied: boolean }>>;
   /** Stores the final human-readable outcome of a run. */
   updateRunSummary(runId: string, summary: string): Promise<Result<void>>;
   /** Persists one activity event and returns its generated ID and timestamp. */

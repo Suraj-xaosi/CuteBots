@@ -11,10 +11,9 @@ import type {
 import { toLLMMessage } from "./agent-loop-utils.js"
 import { repairToolHistory } from "./agent-loop-history.js"
 import { callAgentModel } from "./agent-loop-model.js"
-import {
-  publishRunLog,
-  setRunStatus,
-} from "./agent-loop-persistence.js"
+// CHANGED: the loop no longer writes status logs by hand. publishRunStatus
+// does all of it (info text, database, status event) in the right order.
+import { publishRunStatus } from "./agent-loop-persistence.js"
 import {
   AgentRunGraphState,
   MAX_ITERATIONS,
@@ -45,14 +44,18 @@ export class AgentLoop {
 
     let commandCleanupComplete = false
     try {
-      await setRunStatus(this.persistence, context.runId, AgentRunStatus.RUNNING)
-      await publishRunLog(
+      // CHANGED: one call. It returns false when the run was already finished
+      // before we began (for example the user pressed Stop while it was still
+      // QUEUED). Then there is nothing to do, so we stop instead of running an
+      // agent for a run that is over.
+      const started = await publishRunStatus(
         this.persistence,
         this.channel,
         context.runId,
-        "status",
-        "Agent run started"
+        AgentRunStatus.RUNNING,
+        { info: "Agent run started" }
       )
+      if (!started) return
 
       const loaded = await this.persistence.loadConversationMessages(
         context.conversationId
@@ -93,20 +96,17 @@ export class AgentLoop {
       commandCleanupComplete = true
 
       if (this.controller.signal.aborted) {
-        // Final log FIRST, terminal status LAST: when a viewer sees "finished",
-        // every log is already saved and delivered.
-        await publishRunLog(
+        // CHANGED: same rule as before (text first, terminal status last), and
+        // now the last event sent is the status word "INTERRUPTED".
+        await publishRunStatus(
           this.persistence,
           this.channel,
           context.runId,
-          "status",
-          "Agent run interrupted; conversation history is preserved"
-        ).catch(() => undefined)
-        await setRunStatus(
-          this.persistence,
-          context.runId,
           AgentRunStatus.INTERRUPTED,
-          "Agent run interrupted"
+          {
+            reason: "Agent run interrupted",
+            info: "Agent run interrupted; conversation history is preserved",
+          }
         )
         return
       }
@@ -127,14 +127,14 @@ export class AgentLoop {
         summary
       )
       if (!savedSummary.ok) throw new Error(savedSummary.error)
-      await publishRunLog(
+      // CHANGED: DONE is saved first, then the exact word "DONE" is sent.
+      await publishRunStatus(
         this.persistence,
         this.channel,
         context.runId,
-        "status",
-        "Agent run completed"
-      ).catch(() => undefined)
-      await setRunStatus(this.persistence, context.runId, AgentRunStatus.DONE)
+        AgentRunStatus.DONE,
+        { info: "Agent run completed" }
+      )
     } catch (error) {
       let reason = error instanceof Error ? error.message : "Agent run failed"
       if (!commandCleanupComplete) {
@@ -157,14 +157,19 @@ export class AgentLoop {
       const status = this.controller.signal.aborted
         ? AgentRunStatus.INTERRUPTED
         : AgentRunStatus.FAILED
-      await publishRunLog(
+      // CHANGED: FAILED -> `reason` is written as an "error" log and saved in
+      // the database. INTERRUPTED -> `reason` is shown as an "info" log. In
+      // both cases the status word is sent last.
+      await publishRunStatus(
         this.persistence,
         this.channel,
         context.runId,
-        status === AgentRunStatus.INTERRUPTED ? "status" : "error",
-        reason
-      ).catch(() => undefined)
-      await setRunStatus(this.persistence, context.runId, status, reason)
+        status,
+        {
+          reason,
+          ...(status === AgentRunStatus.INTERRUPTED ? { info: reason } : {}),
+        }
+      )
     } finally {
       this.controller = undefined
       this.activeRunId = undefined

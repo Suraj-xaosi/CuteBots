@@ -10,9 +10,10 @@ import {
   appendActivity,
   statusFromEventContent,
   withAssistantMessage,
+  withConversationRunStatus,
   withRunPatch,
 } from "./conversation-cache"
-import { conversationQuery, runActivityQuery } from "./queries"
+import { conversationQuery, conversationsQuery, runActivityQuery } from "./queries"
 
 // Plain module, no React. The only place that touches EventSource.
 //
@@ -166,6 +167,8 @@ function handleMessage(target: RunStreamTarget, raw: string) {
     createdAt: new Date(value.createdAt),
   }
 
+  if (item.type === "assistant_delta") return
+
   queryClient.setQueryData(runActivityQuery(runId).queryKey, (previous) =>
     appendActivity(previous, item)
   )
@@ -176,6 +179,11 @@ function handleMessage(target: RunStreamTarget, raw: string) {
 
   if (item.type === "status") {
     const status = statusFromEventContent(item.content)
+    // CHANGED: not a status word we know -> ignore it. Never guess.
+    if (status === null) {
+      console.warn("Run stream: ignored a status event with unknown content", item.content)
+      return
+    }
     patchConversation((conversation) =>
       withRunPatch(
         conversation,
@@ -185,6 +193,15 @@ function handleMessage(target: RunStreamTarget, raw: string) {
           : { status }
       )
     )
+    // NEW: keep the sidebar in step. The conversation list has its own cache,
+    // so the latest run of this conversation is patched there too.
+    const cached = queryClient.getQueryData(conversationKey)
+    if (cached) {
+      queryClient.setQueryData(conversationsQuery(cached.projectId).queryKey, (previous) =>
+        withConversationRunStatus(previous, conversationId, runId, status)
+      )
+    }
+
     // Run over: swap the "live-" messages for the real ones from the server.
     if (!isActiveAgentRunStatus(status)) {
       void queryClient.invalidateQueries({ queryKey: conversationKey })
@@ -193,10 +210,16 @@ function handleMessage(target: RunStreamTarget, raw: string) {
   }
 
   if (item.type === "error") {
-    patchConversation((conversation) =>
-      withRunPatch(conversation, runId, { status: AgentRunStatus.FAILED, failReason: item.content })
-    )
-    void queryClient.invalidateQueries({ queryKey: conversationKey })
+    // CHANGED: only remember the reason. We do NOT set FAILED here and we do NOT
+    // refetch here. The server sends the status event "FAILED" right after
+    // (and only after the database is updated), so the status and the refetch
+    // happen there. A refetch here could read the old status.
+    // A late error for a run that is already finished is ignored.
+    patchConversation((conversation) => {
+      const current = conversation.runs.find((candidate) => candidate.id === runId)
+      if (!current || !isActiveAgentRunStatus(current.status)) return conversation
+      return withRunPatch(conversation, runId, { failReason: item.content })
+    })
     return
   }
 

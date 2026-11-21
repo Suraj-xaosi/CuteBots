@@ -6,6 +6,7 @@ import { updateConversation } from "@/lib/actions/conversations"
 import { cancelRun, replyToRun, submitMessage } from "@/lib/actions/runs"
 import { withRunPatch } from "./conversation-cache"
 import { conversationQuery, conversationsQuery } from "./queries"
+import { phaseOf } from "./run-phase"
 import { unwrapVoid } from "./unwrap"
 import { useSelectedProjectId } from "@/hooks/use-selection"
 
@@ -18,6 +19,14 @@ export function useCurrentRun(conversationId: string | null) {
   const { data } = useConversation(conversationId)
   const run = data?.runs[0] ?? null
   return { run, isActive: run !== null && isActiveAgentRunStatus(run.status) }
+}
+
+// NEW: the same run, plus the "phase" the screen should show (see run-phase.ts).
+// The composer, the strip above it and the sidebar all read their answer here,
+// so they can never disagree.
+export function useRunPhase(conversationId: string | null) {
+  const { run } = useCurrentRun(conversationId)
+  return { run, phase: phaseOf(run?.status) }
 }
 
 // One entry point for "user pressed send":

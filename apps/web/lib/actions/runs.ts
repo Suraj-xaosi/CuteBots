@@ -1,14 +1,14 @@
 'use server'
 
 import { prisma } from '@workspace/db'
-import { redactTextSecrets } from '@workspace/core'
+import { publishRunStatus, redactTextSecrets } from '@workspace/core'
 import { AgentRunStatus, ErrorCode, type ActionResult, type RunDetails, isTerminalAgentRunStatus } from '@workspace/types'
 import { z } from 'zod'
 import { hasUsableCredentials, readProjectCredentials } from '../credentials'
 import { persistence } from '../agent-persistence'
 import { forceFinishRun, waitForRunToFinish } from '../run-control'
 import { provisionSandbox } from '../sandbox-service'
-import { containers, replies, runs } from '../agent-runtime'
+import { containers, events, replies, runs } from '../agent-runtime'
 import { actionFailure } from '../action-utils'
 
 const CANCEL_GRACE_MS = 3_000
@@ -148,7 +148,21 @@ async function launchRun(
 
     if (!started.ok) {
       // Undo the claim: terminal status + project lock released.
-      await persistence.updateRunStatus(run.id, AgentRunStatus.FAILED, started.error)
+      // CHANGED: publishRunStatus writes an "error" log with the reason, then
+      // FAILED in the database (which also frees the project lock), then the
+      // status event "FAILED". Before, only the database was changed, so the
+      // Activity list never showed why the start failed.
+      // If this write fails we only log it. The user must still get the REAL
+      // start error below, not a database error.
+      await publishRunStatus(
+        persistence,
+        { sendLog: async (event) => events.publish(event) },
+        run.id,
+        AgentRunStatus.FAILED,
+        { reason: started.error }
+      ).catch((error) => {
+        console.error('Unable to mark the failed start', { runId: run.id, error })
+      })
       throw new RunStartError(started.error, started.code)
     }
 

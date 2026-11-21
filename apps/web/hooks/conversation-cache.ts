@@ -1,8 +1,10 @@
 import {
-  AgentRunStatus,
+  isActiveAgentRunStatus,
+  isAgentRunStatus,
   type ActivityItem,
   type AgentRunStatusValue,
   type ConversationDetails,
+  type ConversationItem,
   type RunItem,
 } from "@workspace/types"
 
@@ -61,13 +63,42 @@ export function withAssistantMessage(
   }
 }
 
-// FRAGILE ON PURPOSE, KEPT IN ONE PLACE: the server currently sends status as
-// free text. When it sends a structured status, replace only this function.
-export function statusFromEventContent(content: string): AgentRunStatusValue {
-  const text = content.toLowerCase()
-  if (text.includes("waiting")) return AgentRunStatus.WAITING_FOR_INPUT
-  if (text.includes("completed")) return AgentRunStatus.DONE
-  if (text.includes("interrupted") || text.includes("cancelled"))
-    return AgentRunStatus.INTERRUPTED
-  return AgentRunStatus.RUNNING
+// NEW: the sidebar list has its own cache (one entry per conversation with its
+// latest run). This keeps that entry in step with the live status events, so the
+// sidebar icon changes without a refetch.
+// - same run                       -> change its status
+// - a run the list does not know   -> it becomes the latest run, but only when
+//   the latest run the list knows is already finished (a late event of an old
+//   run must never replace a newer, active run)
+export function withConversationRunStatus(
+  list: ConversationItem[] | undefined,
+  conversationId: string,
+  runId: string,
+  status: AgentRunStatusValue
+): ConversationItem[] | undefined {
+  if (!list) return list
+
+  return list.map((item) => {
+    if (item.id !== conversationId) return item
+
+    const latest = item.latestRun
+    if (latest && latest.id === runId) {
+      return { ...item, latestRun: { ...latest, status } }
+    }
+    if (latest && isActiveAgentRunStatus(latest.status)) return item
+
+    return {
+      ...item,
+      latestRun: { id: runId, status, summary: null, createdAt: new Date() },
+    }
+  })
+}
+
+// Reads the content of a "status" log.
+// The server sends EXACTLY one status word there (like "DONE"), so we only do
+// an exact match. Anything else returns null and the caller must ignore it.
+// We never guess a status from a sentence anymore.
+export function statusFromEventContent(content: string): AgentRunStatusValue | null {
+  const word = content.trim()
+  return isAgentRunStatus(word) ? word : null
 }

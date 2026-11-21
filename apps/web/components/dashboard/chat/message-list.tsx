@@ -11,7 +11,11 @@ import { MessageBubble } from "./message-bubble"
 export function MessageList({ conversationId }: { conversationId: string | null }) {
   const conversation = useConversation(conversationId)
   const messages = conversation.data?.messages
-  const visibleMessages = (messages ?? []).filter((message) => message.role !== "tool")
+  const visibleMessages = (messages ?? []).filter(
+    (message) =>
+      message.role !== "tool" &&
+      (message.role !== "assistant" || message.content.trim().length > 0)
+  )
 
   if (visibleMessages.length) {
     return (

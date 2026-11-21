@@ -46,13 +46,24 @@ export async function recoverOnBoot() {
     if (leftovers.length > 0) {
       const ids = leftovers.map((run) => run.id)
       await prisma.$transaction([
-        // log first, status last (same rule as the agent loop)
+        // CHANGED: two rows per run, in this order: a sentence for people
+        // ("info"), then the status word ("status"). The "status" row holds
+        // only the word, like everywhere else.
+        //
+        // We do not call publishRunStatus here on purpose. Right after boot
+        // nobody is connected to the live stream, and this one transaction
+        // writes the rows AND the INTERRUPTED status together. So a browser
+        // can never see the status event before the database has the status.
+        // A browser that reconnects later gets both rows from the replay.
         prisma.agentLog.createMany({
-          data: ids.map((run_id) => ({
-            run_id,
-            type: 'status',
-            content: 'Run interrupted because the server restarted. Your conversation is kept; send a message to continue.',
-          })),
+          data: ids.flatMap((run_id) => [
+            {
+              run_id,
+              type: 'info',
+              content: 'Run interrupted because the server restarted. Your conversation is kept; send a message to continue.',
+            },
+            { run_id, type: 'status', content: 'INTERRUPTED' },
+          ]),
         }),
         prisma.agentLog.deleteMany({ where: { run_id: { in: ids }, type: 'assistant_delta' } }),
         prisma.agentRun.updateMany({

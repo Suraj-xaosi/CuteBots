@@ -1,8 +1,19 @@
-import { Ban, CircleCheck, CircleDashed, CircleDot, LoaderCircle } from "lucide-react"
+import {
+  Ban,
+  CircleCheck,
+  CircleDashed,
+  CircleDot,
+  CircleHelp,
+  CircleStop,
+  Clock,
+  LoaderCircle,
+} from "lucide-react"
 import { AgentRunStatus, type AgentRunStatusValue } from "@workspace/types"
 import { cn } from "@workspace/ui/lib/utils"
 
 // Black and white: only a failed run gets the destructive colour.
+// CHANGED: every status has its own icon now. Before, QUEUED, INTERRUPTED and
+// AWAITING_APPROVAL all showed the same dashed circle as "no run yet".
 export function StatusIcon({
   status,
   className,
@@ -18,6 +29,13 @@ export function StatusIcon({
   if (status === AgentRunStatus.WAITING_FOR_INPUT) return <CircleDot className={base} aria-hidden />
   if (status === AgentRunStatus.FAILED)
     return <Ban className={cn(base, "text-destructive")} aria-hidden />
+  if (status === AgentRunStatus.QUEUED)
+    return <Clock className={cn(base, "text-muted-foreground")} aria-hidden />
+  if (status === AgentRunStatus.INTERRUPTED)
+    return <CircleStop className={cn(base, "text-muted-foreground")} aria-hidden />
+  if (status === AgentRunStatus.AWAITING_APPROVAL)
+    return <CircleHelp className={base} aria-hidden />
+  // No run yet.
   return <CircleDashed className={cn(base, "text-muted-foreground")} aria-hidden />
 }
 

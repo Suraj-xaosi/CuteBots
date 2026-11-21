@@ -9,6 +9,7 @@ import {
   ToolRegistry,
   UIChannel,
   isCommandFailure,
+  publishRunStatus, // NEW: the one way to change a run's status
   type AgentExecutor,
   type AgentRunContext,
   type Sandbox,
@@ -95,10 +96,24 @@ function createExecutor(
     }
   }
 
-  // The ONLY way this executor ends a run unsuccessfully: say why, then go terminal.
+  // The ONLY way this executor ends a run unsuccessfully.
+  // CHANGED: publishRunStatus does all three steps in the right order:
+  //   1. an "error" log with the reason (shows in the Activity list)
+  //   2. FAILED in the database (with the reason)
+  //   3. the status event "FAILED" (the browser reads only this word)
+  // Before, this only wrote the error log and the database. The browser never
+  // got a status event, so it had to guess from the error log.
+  // The channel here is tiny: it only forwards events to the live stream.
   const failRun = async (reason: string) => {
-    await note('error', reason)
-    await persistence.updateRunStatus(context.runId, AgentRunStatus.FAILED, reason).catch(() => null)
+    await publishRunStatus(
+      persistence,
+      { sendLog: async (event) => deps.events.publish(event) },
+      context.runId,
+      AgentRunStatus.FAILED,
+      { reason }
+    ).catch((error) => {
+      console.error('Unable to mark the run as failed', { runId: context.runId, error })
+    })
   }
 
   return {

@@ -104,7 +104,9 @@ export const persistence: AgentRunPersistence = {
       // Compare-and-set: a finished run is FINAL. A late DONE can no longer
       // overwrite INTERRUPTED (cancel / hard stop), and vice versa.
       // started_at is written once, not every time WAITING_FOR_INPUT -> RUNNING.
-      await prisma.agentRun.updateMany({
+      // CHANGED: keep the result. updated.count is 0 when the run was already
+      // finished, so nothing was changed (see `applied` below).
+      const updated = await prisma.agentRun.updateMany({
         where: {
           id,
           status: { notIn: [DbRunStatus.DONE, DbRunStatus.FAILED, DbRunStatus.INTERRUPTED] },
@@ -131,7 +133,8 @@ export const persistence: AgentRunPersistence = {
           .catch(() => null)
       }
 
-      return { ok: true, data: undefined }
+      // CHANGED: tell the caller if the status was really changed.
+      return { ok: true, data: { applied: updated.count > 0 } }
     } catch (error) {
       console.error('Update run status failed', { runId: id, status, error })
       return {

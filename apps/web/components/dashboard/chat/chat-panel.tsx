@@ -6,8 +6,10 @@ import { useActiveConversationId } from "@/hooks/use-selection"
 import { ChatToolbar } from "./chat-toolbar"
 import { Composer } from "./composer"
 import { MessageList } from "./message-list"
+import { RunStrip } from "./run-strip"
 
-// Three stacked parts: fixed toolbar, scrolling messages, fixed composer.
+// Four stacked parts: fixed toolbar, scrolling messages, the run strip (status
+// and Stop, shown only while it matters) and the fixed composer.
 // The conversation title is gone from the screen (the sidebar shows it) but
 // stays as a heading for screen readers.
 export function ChatPanel() {
@@ -21,6 +23,7 @@ export function ChatPanel() {
       <PanelBody>
         <MessageList conversationId={conversationId} />
       </PanelBody>
+      <RunStrip conversationId={conversationId} />
       <Composer conversationId={conversationId} />
     </Panel>
   )

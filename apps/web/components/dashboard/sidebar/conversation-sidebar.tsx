@@ -58,6 +58,7 @@ export function ConversationSidebar() {
               <li key={conversation.id}>
                 <ConversationItem
                   title={conversation.title}
+                  status={conversation.latestRun?.status ?? null}
                   active={activeId === conversation.id}
                   onSelect={() => dispatch(workspaceActions.conversationSelected(conversation.id))}
                   onDelete={() => {
